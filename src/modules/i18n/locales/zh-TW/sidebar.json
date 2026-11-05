@@ -142,6 +142,10 @@
     "projectsScanned_one": "{{count}} 個專案已掃描",
     "projectsScanned_other": "{{count}} 個專案已掃描"
   },
+  "providerFilter": {
+    "label": "依智慧代理篩選工作階段",
+    "all": "全部"
+  },
   "deleteConfirmation": {
     "deleteProject": "移除專案",
     "deleteSession": "刪除工作階段",
@@ -171,6 +175,7 @@
     "open": "清理舊工作階段",
     "title": "清理舊工作階段",
     "description": "列出 {{days}} 天以上沒有動過的工作階段，包括已封存的。加星的專案和正在執行的工作階段不會列出。",
+    "providerOnly": "只列出 {{agent}} 的工作階段。",
     "permanentNotice": "刪除會同時從 Claude Code 或 Codex 裡刪掉這個工作階段（對話記錄、附帶檔案、Codex 自己的資料庫記錄），無法復原。",
     "idleFor": "至少多久沒動",
     "days_one": "{{count}} 天",

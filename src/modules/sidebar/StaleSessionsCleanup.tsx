@@ -5,8 +5,8 @@ import type { TFunction } from 'i18next';
 
 import { api } from '@/shared/api';
 import { Button, LLMProviderLogo } from '@/shared/ui';
-import { cn } from '@/shared/utils';
-import type { SessionDeletionFailure, StaleSessionListItem } from '@/shared/types';
+import { cn, matchesSessionProviderFilter } from '@/shared/utils';
+import type { SessionDeletionFailure, SessionProviderFilter, StaleSessionListItem } from '@/shared/types';
 import { PROVIDER_LABELS, formatCompactAge } from '@/modules/sidebar/utils/sidebarProjectFormatting';
 
 /** The idle periods offered; the first is the default. */
@@ -47,6 +47,8 @@ type StaleSessionsCleanupProps = {
   /** Permanently deletes the sessions and resolves with the ones that could not be deleted. */
   onDeleteSessions: (sessionIds: string[], onProgress: (settled: number) => void) => Promise<SessionDeletionFailure[]>;
   currentTime: Date;
+  /** The sidebar's agent filter: only that agent's sessions are listed, and so only they can be deleted. */
+  providerFilter?: SessionProviderFilter;
   t: TFunction;
 };
 
@@ -56,9 +58,15 @@ type DeleteProgress = { settled: number; total: number };
  * Rendered by Sidebar from the archive view's "clean up old sessions" button:
  * lists sessions nobody has touched for a while, grouped by project, and
  * permanently deletes the ticked ones from CloudCLI and from the agent that
- * owns them.
+ * owns them. While the sidebar is narrowed to one agent, so is the list.
  */
-export default function StaleSessionsCleanup({ onClose, onDeleteSessions, currentTime, t }: StaleSessionsCleanupProps) {
+export default function StaleSessionsCleanup({
+  onClose,
+  onDeleteSessions,
+  currentTime,
+  providerFilter = 'all',
+  t,
+}: StaleSessionsCleanupProps) {
   const [idleDays, setIdleDays] = useState<number>(IDLE_DAY_CHOICES[0]);
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [sessions, setSessions] = useState<StaleSessionListItem[]>([]);
@@ -80,7 +88,8 @@ export default function StaleSessionsCleanup({ onClose, onDeleteSessions, curren
           throw new Error(`status ${response.status}`);
         }
         const payload = (await response.json()) as StaleSessionsApiPayload;
-        const next = Array.isArray(payload.data?.sessions) ? payload.data.sessions : [];
+        const next = (Array.isArray(payload.data?.sessions) ? payload.data.sessions : [])
+          .filter((session) => matchesSessionProviderFilter(session.provider, providerFilter));
         if (cancelled) {
           return;
         }
@@ -100,7 +109,7 @@ export default function StaleSessionsCleanup({ onClose, onDeleteSessions, curren
     return () => {
       cancelled = true;
     };
-  }, [idleDays, reloadToken]);
+  }, [idleDays, providerFilter, reloadToken]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -173,6 +182,15 @@ export default function StaleSessionsCleanup({ onClose, onDeleteSessions, curren
                 defaultValue: 'Sessions idle for {{days}} days or more, archived ones included. Starred projects and running sessions are not listed.',
               })}
             </p>
+            {providerFilter !== 'all' && (
+              <p className="mt-1 flex items-center gap-1.5 text-xs leading-relaxed text-foreground">
+                <LLMProviderLogo provider={providerFilter} className="h-3.5 w-3.5 flex-shrink-0" />
+                {t('staleCleanup.providerOnly', {
+                  agent: PROVIDER_LABELS[providerFilter],
+                  defaultValue: 'Only {{agent}} sessions are listed.',
+                })}
+              </p>
+            )}
             <p className="mt-1 text-xs leading-relaxed text-red-600 dark:text-red-400">
               {t('staleCleanup.permanentNotice', 'Deleting also removes the session from Claude Code or Codex (transcript, side files, Codex\'s own records). It cannot be undone.')}
             </p>

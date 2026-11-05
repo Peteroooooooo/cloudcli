@@ -4,9 +4,10 @@ import type { TFunction } from 'i18next';
 import { Button, Input } from '@/shared/ui';
 import { CLOUDCLI_WORDMARK_FONT_FAMILY } from '@/shared/constants';
 import { IS_PLATFORM } from '@/shared/utils';
-import type { SidebarSearchMode } from '@/shared/types';
+import type { LLMProvider, SessionProviderFilter, SidebarSearchMode } from '@/shared/types';
 import GitHubStarBadge from '@/modules/sidebar/GitHubStarBadge';
 import SidebarModeTabs from '@/modules/sidebar/SidebarModeTabs';
+import SidebarProviderFilter from '@/modules/sidebar/SidebarProviderFilter';
 
 const MOD_KEY =
   typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
@@ -24,6 +25,10 @@ type SidebarHeaderProps = {
   onClearSearchFilter: () => void;
   searchMode: SidebarSearchMode;
   onSearchModeChange: (mode: SidebarSearchMode) => void;
+  providerFilter: SessionProviderFilter;
+  /** The agents the agent filter offers after "All". */
+  providerFilterOptions: LLMProvider[];
+  onProviderFilterChange: (filter: SessionProviderFilter) => void;
   onRefresh: () => void;
   isRefreshing: boolean;
   onCreateProject: () => void;
@@ -64,6 +69,9 @@ export default function SidebarHeader({
   onClearSearchFilter,
   searchMode,
   onSearchModeChange,
+  providerFilter,
+  providerFilterOptions,
+  onProviderFilterChange,
   onRefresh,
   isRefreshing,
   onCreateProject,
@@ -147,6 +155,12 @@ export default function SidebarHeader({
               runningSessionsCount={runningSessionsCount}
               t={t}
             />
+            <SidebarProviderFilter
+              value={providerFilter}
+              providers={providerFilterOptions}
+              onChange={onProviderFilterChange}
+              t={t}
+            />
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/50" />
               <Input
@@ -224,6 +238,12 @@ export default function SidebarHeader({
               searchMode={searchMode}
               onSearchModeChange={onSearchModeChange}
               runningSessionsCount={runningSessionsCount}
+              t={t}
+            />
+            <SidebarProviderFilter
+              value={providerFilter}
+              providers={providerFilterOptions}
+              onChange={onProviderFilterChange}
               t={t}
             />
             <div className="relative">

@@ -143,6 +143,10 @@
     "projectsScanned_one": "{{count}} 个项目已扫描",
     "projectsScanned_other": "{{count}} 个项目已扫描"
   },
+  "providerFilter": {
+    "label": "按智能体筛选会话",
+    "all": "全部"
+  },
   "deleteConfirmation": {
     "deleteProject": "移除项目",
     "deleteSession": "删除会话",
@@ -172,6 +176,7 @@
     "open": "清理旧会话",
     "title": "清理旧会话",
     "description": "列出 {{days}} 天以上没有动过的会话，包括已归档的。加星的项目和正在运行的会话不会列出。",
+    "providerOnly": "只列出 {{agent}} 的会话。",
     "permanentNotice": "删除会同时从 Claude Code 或 Codex 里删掉这个会话（对话记录、附带文件、Codex 自己的数据库记录），不能恢复。",
     "idleFor": "至少多久没动",
     "days_one": "{{count}} 天",

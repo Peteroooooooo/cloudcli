@@ -560,11 +560,14 @@ export const sessionsDb = {
    * and correctly ordered across projects instead of flattening only the
    * per-project slices already loaded by the client.
    */
-  getRecentSessionsPage(limit: number, offset: number): RecentSessionsPage {
+  getRecentSessionsPage(limit: number, offset: number, provider: string | null = null): RecentSessionsPage {
     const db = getConnection();
+    // `provider` NULL means every provider; the page and the total share the
+    // clause so the total always describes the list being paged through.
     const visibilityClause = `
       sessions.isArchived = 0
       AND (projects.isArchived IS NULL OR projects.isArchived = 0)
+      AND (? IS NULL OR sessions.provider = ?)
     `;
     const rows = db
       .prepare(
@@ -576,7 +579,7 @@ export const sessionsDb = {
                   sessions.session_id DESC
          LIMIT ? OFFSET ?`
       )
-      .all(limit, offset) as SessionRow[];
+      .all(provider, provider, limit, offset) as SessionRow[];
     const countRow = db
       .prepare(
         `SELECT COUNT(*) AS count
@@ -584,7 +587,7 @@ export const sessionsDb = {
          LEFT JOIN projects ON projects.project_path = sessions.project_path
          WHERE ${visibilityClause}`
       )
-      .get() as { count: number } | undefined;
+      .get(provider, provider) as { count: number } | undefined;
 
     return {
       sessions: normalizeSessionRows(rows),
@@ -661,7 +664,13 @@ export const sessionsDb = {
     return normalizeSessionRows(rows);
   },
 
-  getSessionsByProjectPathPage(projectPath: string, limit: number, offset: number): SessionRow[] {
+  /** One page of a project's visible sessions, newest first; `provider` narrows it to one provider. */
+  getSessionsByProjectPathPage(
+    projectPath: string,
+    limit: number,
+    offset: number,
+    provider: string | null = null,
+  ): SessionRow[] {
     const db = getConnection();
     const normalizedProjectPath = normalizeProjectPath(projectPath);
     const rows = db
@@ -670,15 +679,17 @@ export const sessionsDb = {
          FROM sessions
          WHERE project_path = ?
            AND isArchived = 0
+           AND (? IS NULL OR provider = ?)
          ORDER BY datetime(COALESCE(updated_at, created_at)) DESC, session_id DESC
          LIMIT ? OFFSET ?`
       )
-      .all(normalizedProjectPath, limit, offset) as SessionRow[];
+      .all(normalizedProjectPath, provider, provider, limit, offset) as SessionRow[];
 
     return normalizeSessionRows(rows);
   },
 
-  countSessionsByProjectPath(projectPath: string): number {
+  /** The total behind `getSessionsByProjectPathPage`, with the same provider narrowing. */
+  countSessionsByProjectPath(projectPath: string, provider: string | null = null): number {
     const db = getConnection();
     const normalizedProjectPath = normalizeProjectPath(projectPath);
     const row = db
@@ -686,11 +697,31 @@ export const sessionsDb = {
         `SELECT COUNT(*) AS count
          FROM sessions
          WHERE project_path = ?
-           AND isArchived = 0`
+           AND isArchived = 0
+           AND (? IS NULL OR provider = ?)`
       )
-      .get(normalizedProjectPath) as { count: number } | undefined;
+      .get(normalizedProjectPath, provider, provider) as { count: number } | undefined;
 
     return Number(row?.count ?? 0);
+  },
+
+  /**
+   * How many sessions each provider has, archived ones and those of archived
+   * projects included: the sidebar's agent filter also applies to the Archive
+   * view, so an agent whose sessions are all archived still needs its segment.
+   * Providers without a row are absent from the result.
+   */
+  countSessionsByProvider(): Array<{ provider: string; count: number }> {
+    const db = getConnection();
+    const rows = db
+      .prepare(
+        `SELECT provider, COUNT(*) AS count
+         FROM sessions
+         GROUP BY provider`
+      )
+      .all() as Array<{ provider: string; count: number }>;
+
+    return rows.map((row) => ({ provider: row.provider, count: Number(row.count) }));
   },
 
   deleteSessionsByProjectPath(projectPath: string): void {

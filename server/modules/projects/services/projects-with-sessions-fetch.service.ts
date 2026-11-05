@@ -4,7 +4,7 @@ import path from 'node:path';
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { sessionSynchronizerService } from '@/modules/providers/index.js';
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
-import type { RealtimeClientConnection } from '@/shared/types.js';
+import type { LLMProvider, RealtimeClientConnection } from '@/shared/types.js';
 import { AppError } from '@/shared/utils.js';
 
 type SessionSummary = {
@@ -51,11 +51,14 @@ type GetProjectsWithSessionsOptions = {
   skipSynchronization?: boolean;
   sessionsLimit?: number;
   sessionsOffset?: number;
+  /** Lists only this provider's sessions (page and total); null or absent lists every provider. */
+  provider?: LLMProvider | null;
 };
 
 type SessionPaginationOptions = {
   limit?: number;
   offset?: number;
+  provider?: LLMProvider | null;
 };
 
 type ProjectSessionsPageResult = {
@@ -145,12 +148,14 @@ function readProjectSessionsPageByPath(
   options: SessionPaginationOptions = {},
 ): ProjectSessionsPageResult {
   const pagination = normalizeSessionPagination(options);
+  const provider = options.provider ?? null;
   const rows = sessionsDb.getSessionsByProjectPathPage(
     projectPath,
     pagination.limit,
     pagination.offset,
+    provider,
   ) as SessionRepositoryRow[];
-  const total = sessionsDb.countSessionsByProjectPath(projectPath);
+  const total = sessionsDb.countSessionsByProjectPath(projectPath, provider);
 
   return {
     sessions: rows.map(mapSessionRowToSummary),
@@ -215,6 +220,7 @@ export async function getProjectsWithSessions(
     const sessionsPage = readProjectSessionsPageByPath(projectPath, {
       limit: options.sessionsLimit,
       offset: options.sessionsOffset,
+      provider: options.provider,
     });
 
     projects.push({

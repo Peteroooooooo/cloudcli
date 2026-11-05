@@ -146,6 +146,19 @@ export type LoadingProgress = {
   [key: string]: unknown;
 };
 
+/**
+ * Which agent's sessions the sidebar lists: one provider, or `all` for every
+ * provider. Picked with the agent filter above the sidebar search box and sent
+ * as the `provider` query parameter of the session list endpoints.
+ */
+export type SessionProviderFilter = LLMProvider | 'all';
+
+/**
+ * Sessions per provider as `GET /api/providers/sessions/provider-counts`
+ * returns them, archived ones included. Providers without sessions are absent.
+ */
+export type SessionProviderCounts = Partial<Record<LLMProvider, number>>;
+
 // ---------------------------
 
 //----------------- RELEASES ------------

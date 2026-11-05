@@ -7,9 +7,11 @@ import type { ServerEvent,
   LLMProvider,
   LoadingProgress,
   Project,
-  ProjectSession,IsSessionProcessing } from '@/shared/types';
+  ProjectSession,IsSessionProcessing,
+  SessionProviderFilter } from '@/shared/types';
 import { mergeProjectSelectionMetadata } from '@/modules/project-workspace/utils/projectSelectionMetadata';
 import { readSelectedProvider } from '@/shared/selectedProvider';
+import { matchesSessionProviderFilter, parseSessionProviderFilter } from '@/shared/utils';
 
 type UseProjectsStateArgs = {
   sessionId?: string;
@@ -45,6 +47,8 @@ type SessionUpsertedEvent = ServerEvent & {
 
 type FetchProjectsOptions = {
   showLoadingState?: boolean;
+  /** Answer from the DB without re-scanning provider transcripts first; for refetches that only change what is shown. */
+  skipSync?: boolean;
 };
 
 type RegisterOptimisticSessionArgs = {
@@ -379,6 +383,25 @@ const readPersistedTab = (): AppTab => {
   return 'chat';
 };
 
+const PROVIDER_FILTER_STORAGE_KEY = 'cloudcli-sidebar-provider-filter';
+
+/** The agent filter this browser last used; `all` when none was kept or storage is unavailable. */
+const readPersistedProviderFilter = (): SessionProviderFilter => {
+  try {
+    return parseSessionProviderFilter(localStorage.getItem(PROVIDER_FILTER_STORAGE_KEY));
+  } catch {
+    return 'all';
+  }
+};
+
+const persistProviderFilter = (filter: SessionProviderFilter) => {
+  try {
+    localStorage.setItem(PROVIDER_FILTER_STORAGE_KEY, filter);
+  } catch {
+    // The choice still applies for this visit.
+  }
+};
+
 export function useProjectsState({
   sessionId,
   navigate,
@@ -391,6 +414,10 @@ export function useProjectsState({
   const [selectedSession, setSelectedSession] = useState<ProjectSession | null>(null);
   const [attentionSessionIds, setAttentionSessionIds] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<AppTab>(readPersistedTab);
+  // The agent the sidebar's session lists are narrowed to, picked with its
+  // agent filter. Owned here rather than by the sidebar because the server
+  // filters `/api/projects`, which this hook fetches, by it.
+  const [providerFilter, setProviderFilter] = useState<SessionProviderFilter>(readPersistedProviderFilter);
 
   useEffect(() => {
     try {
@@ -466,6 +493,18 @@ export function useProjectsState({
    * same payload — the workspace header and document title.
    */
   const projectsRequestIdRef = useRef(0);
+  /**
+   * The agent filter as of the latest choice, read by the fetches and the
+   * websocket handler. Written by `changeProviderFilter` before it refetches,
+   * so the refetch already carries the new value.
+   */
+  const providerFilterRef = useRef(providerFilter);
+  /**
+   * The filter the sessions now in `projects` were fetched under. Pages loaded
+   * past the first are merged into a response only when it was fetched under
+   * the same filter; otherwise they would bring another agent's sessions back.
+   */
+  const projectsProviderFilterRef = useRef(providerFilter);
 
   useEffect(() => {
     sessionLookupRef.current = null;
@@ -508,26 +547,32 @@ export function useProjectsState({
     });
   }, []);
 
-  const fetchProjects = useCallback(async ({ showLoadingState = true }: FetchProjectsOptions = {}) => {
+  const fetchProjects = useCallback(async ({ showLoadingState = true, skipSync = false }: FetchProjectsOptions = {}) => {
     // Claimed before the request starts and read again in `finally`, so the
     // loading flag is only ever cleared by the response that actually wrote
     // `projects`.
     const requestId = (projectsRequestIdRef.current += 1);
+    const requestFilter = providerFilterRef.current;
 
     try {
       if (showLoadingState) {
         setIsLoadingProjects(true);
       }
-      const response = await api.projects();
+      const response = await api.projects({ provider: requestFilter, skipSync });
       const projectData = (await response.json()) as Project[];
 
       if (projectsRequestIdRef.current !== requestId) {
         return;
       }
 
+      const keepLoadedPages = projectsProviderFilterRef.current === requestFilter;
+      projectsProviderFilterRef.current = requestFilter;
+
       setProjects((prevProjects) => {
         const projectsWithTaskMaster = mergeTaskMasterCache(projectData, prevProjects);
-        const mergedProjects = mergeExpandedSessionPages(prevProjects, projectsWithTaskMaster);
+        const mergedProjects = keepLoadedPages
+          ? mergeExpandedSessionPages(prevProjects, projectsWithTaskMaster)
+          : projectsWithTaskMaster;
 
         if (prevProjects.length === 0) {
           return mergedProjects;
@@ -623,21 +668,25 @@ export function useProjectsState({
       timestamp: now,
     };
 
-    setProjects((previousProjects) => {
-      const existingProject = previousProjects.find((candidate) => candidate.projectId === project.projectId);
-      if (!existingProject) {
-        return [upsertSessionIntoProject(projectFromRegistration(project), upsert), ...previousProjects];
-      }
+    // A sidebar narrowed to another agent does not list the new session; the
+    // chat still opens it below.
+    if (matchesSessionProviderFilter(provider, providerFilterRef.current)) {
+      setProjects((previousProjects) => {
+        const existingProject = previousProjects.find((candidate) => candidate.projectId === project.projectId);
+        if (!existingProject) {
+          return [upsertSessionIntoProject(projectFromRegistration(project), upsert), ...previousProjects];
+        }
 
-      const updatedProject = upsertSessionIntoProject(existingProject, upsert);
-      if (updatedProject === existingProject) {
-        return previousProjects;
-      }
+        const updatedProject = upsertSessionIntoProject(existingProject, upsert);
+        if (updatedProject === existingProject) {
+          return previousProjects;
+        }
 
-      return previousProjects.map((candidate) =>
-        candidate.projectId === existingProject.projectId ? updatedProject : candidate,
-      );
-    });
+        return previousProjects.map((candidate) =>
+          candidate.projectId === existingProject.projectId ? updatedProject : candidate,
+        );
+      });
+    }
 
     setSelectedSession((previousSession) => (
       previousSession?.id === newSessionId
@@ -839,7 +888,14 @@ export function useProjectsState({
         markSessionAttention(upsert.sessionId);
       }
 
+      // A sidebar narrowed to one agent takes no rows of another; the rest of
+      // this event (attention, reload, alias swap) still applies.
+      const fitsProviderFilter = matchesSessionProviderFilter(upsert.provider, providerFilterRef.current);
       setProjects((previousProjects) => {
+        if (!fitsProviderFilter) {
+          return previousProjects;
+        }
+
         const targetProjectId = upsert.project?.projectId;
         const existingProject = previousProjects.find((project) =>
           targetProjectId ? project.projectId === targetProjectId : getProjectSessions(project).some((session) => session.id === upsert.sessionId),
@@ -1137,11 +1193,22 @@ export function useProjectsState({
   );
 
   const handleSidebarRefresh = useCallback(async () => {
+    const requestFilter = providerFilterRef.current;
     try {
-      const response = await api.projects();
+      const response = await api.projects({ provider: requestFilter });
       const freshProjects = (await response.json()) as Project[];
+      // The agent filter changed while the server was answering; the refetch
+      // that change started brings the list in line.
+      if (providerFilterRef.current !== requestFilter) {
+        return;
+      }
+
+      const keepLoadedPages = projectsProviderFilterRef.current === requestFilter;
+      projectsProviderFilterRef.current = requestFilter;
       const projectsWithTaskMaster = mergeTaskMasterCache(freshProjects, projects);
-      const mergedProjects = mergeExpandedSessionPages(projects, projectsWithTaskMaster);
+      const mergedProjects = keepLoadedPages
+        ? mergeExpandedSessionPages(projects, projectsWithTaskMaster)
+        : projectsWithTaskMaster;
 
       setProjects((prevProjects) =>
         projectsHaveChanges(prevProjects, mergedProjects) ? mergedProjects : prevProjects,
@@ -1249,9 +1316,11 @@ export function useProjectsState({
       return;
     }
 
+    const requestFilter = providerFilterRef.current;
     const response = await api.projectSessions(projectId, {
       limit: 20,
       offset: loadedCount,
+      provider: requestFilter,
     });
 
     if (!response.ok) {
@@ -1267,6 +1336,12 @@ export function useProjectsState({
     }
 
     const sessionsPage = (await response.json()) as ProjectSessionPage;
+
+    // The page continues a list fetched under another filter, or the filter
+    // changed while it loaded: either way it does not belong in today's list.
+    if (providerFilterRef.current !== requestFilter || projectsProviderFilterRef.current !== requestFilter) {
+      return;
+    }
 
     setProjects((previousProjects) =>
       previousProjects.map((candidate) => {
@@ -1294,12 +1369,30 @@ export function useProjectsState({
     [navigate, selectedProject?.projectId],
   );
 
+  /**
+   * Narrows the sidebar to one agent's sessions, or widens it back to all, and
+   * remembers the choice in this browser. The list is refetched from the DB at
+   * once; until it lands the sidebar hides the other agents' rows itself.
+   */
+  const changeProviderFilter = useCallback((nextFilter: SessionProviderFilter) => {
+    if (nextFilter === providerFilterRef.current) {
+      return;
+    }
+
+    providerFilterRef.current = nextFilter;
+    setProviderFilter(nextFilter);
+    persistProviderFilter(nextFilter);
+    void fetchProjects({ showLoadingState: false, skipSync: true });
+  }, [fetchProjects]);
+
   const sidebarSharedProps = useMemo(
     () => ({
       projects,
       selectedProject,
       selectedSession,
       attentionSessionIds,
+      providerFilter,
+      onProviderFilterChange: changeProviderFilter,
       onProjectSelect: handleProjectSelect,
       onSessionSelect: handleSessionSelect,
       onNewSession: handleNewSession,
@@ -1317,6 +1410,7 @@ export function useProjectsState({
     }),
     [
       attentionSessionIds,
+      changeProviderFilter,
       handleNewSession,
       handleProjectDelete,
       handleProjectSelect,
@@ -1328,6 +1422,7 @@ export function useProjectsState({
       isMobile,
       loadingProgress,
       projects,
+      providerFilter,
       settingsInitialTab,
       selectedProject,
       selectedSession,

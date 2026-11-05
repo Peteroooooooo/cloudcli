@@ -3,8 +3,9 @@ import type { TFunction } from 'i18next';
 
 import { api } from '@/shared/api';
 import { subscribeToUserPreferences } from '@/shared/userSettings';
+import { matchesSessionProviderFilter } from '@/shared/utils';
 import { usePaletteOps } from '@/modules/command-palette';
-import type { ArchivedProjectListItem, ArchivedSessionListItem, ConversationProjectResult, ConversationSearchResults, LLMProvider, Project, ProjectSession, ProjectSortOrder, RecentConversationListItem, SearchProgress, ActiveSidebarRename, PendingSidebarDeletion, ServerEvent, SessionDeletionFailure, SessionTitleSearchResult, SessionWithProvider, SidebarSearchMode, SidebarSessionSelection } from '@/shared/types';
+import type { ArchivedProjectListItem, ArchivedSessionListItem, ConversationProjectResult, ConversationSearchResults, LLMProvider, Project, ProjectSession, ProjectSortOrder, RecentConversationListItem, SearchProgress, ActiveSidebarRename, PendingSidebarDeletion, ServerEvent, SessionDeletionFailure, SessionProviderFilter, SessionTitleSearchResult, SessionWithProvider, SidebarSearchMode, SidebarSessionSelection } from '@/shared/types';
 import {
   filterProjects,
   getAllSessions,
@@ -57,6 +58,53 @@ type RecentConversationsApiPayload = {
 /** Permanent deletes in flight at once; each Codex one waits for Codex's own delete. */
 const PERMANENT_DELETE_CONCURRENCY = 3;
 
+/**
+ * Narrowed copies of projects, keyed by the project object like getAllSessions,
+ * so a copy keeps its identity across renders and the memoized rows hold.
+ */
+const narrowedProjectCache = new WeakMap<Project, { filter: LLMProvider; project: Project }>();
+
+/**
+ * The project with only `filter`'s sessions. The server already sends only
+ * those, so this returns the project itself unless another agent's rows got
+ * in: during the moment between choosing a filter and its refetch landing, or
+ * through a live update. The copy's count is what it holds, and it offers no
+ * "load more", until the refetch replaces it.
+ */
+function narrowProjectToProvider(project: Project, filter: LLMProvider): Project {
+  const cached = narrowedProjectCache.get(project);
+  if (cached?.filter === filter) {
+    return cached.project;
+  }
+
+  const sessions = project.sessions ?? [];
+  const matching = sessions.filter((session) => matchesSessionProviderFilter(session.__provider ?? session.provider, filter));
+  const narrowed = matching.length === sessions.length
+    ? project
+    : {
+      ...project,
+      sessions: matching,
+      sessionMeta: { ...project.sessionMeta, total: matching.length, hasMore: false },
+    };
+  narrowedProjectCache.set(project, { filter, project: narrowed });
+  return narrowed;
+}
+
+/** The projects with only `filter`'s sessions; a project left with none is dropped, starred or not. */
+function narrowProjectsToProvider<T extends Project>(projects: T[], filter: SessionProviderFilter): T[] {
+  if (filter === 'all') {
+    return projects;
+  }
+
+  return projects.reduce<T[]>((kept, project) => {
+    const narrowed = narrowProjectToProvider(project, filter) as T;
+    if ((narrowed.sessions ?? []).length > 0) {
+      kept.push(narrowed);
+    }
+    return kept;
+  }, []);
+}
+
 /** The reason an API error response gives, or its status when it gives none. */
 async function readApiErrorMessage(response: Response): Promise<string> {
   try {
@@ -97,6 +145,8 @@ type UseSidebarControllerArgs = {
   keepProjectsExpanded?: boolean;
   /** The websocket frame feed; used to drop rows for sessions deleted outside the app. */
   subscribe?: (listener: (event: ServerEvent) => void) => () => void;
+  /** The agent every list is narrowed to; `all` (the default) lists every agent's sessions. */
+  providerFilter?: SessionProviderFilter;
 };
 
 /** Used by Sidebar to coordinate project navigation, expansion and session actions. */
@@ -120,6 +170,7 @@ export function useSidebarController({
   sidebarVisible,
   keepProjectsExpanded = false,
   subscribe,
+  providerFilter = 'all',
 }: UseSidebarControllerArgs) {
   const paletteOps = usePaletteOps();
   // Remember whether a saved set existed before the first persistence effect.
@@ -213,7 +264,6 @@ export function useSidebarController({
 
   const isSidebarCollapsed = !isMobile && !sidebarVisible;
   const activeSessionIds = activeSessions;
-  const runningSessionsCount = activeSessionIds.size;
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -322,7 +372,7 @@ export function useSidebarController({
     setRecentConversationsError(false);
 
     try {
-      const response = await api.recentConversations({ limit: 40, offset });
+      const response = await api.recentConversations({ limit: 40, offset, provider: providerFilter });
       if (!response.ok) {
         throw new Error(`Failed to load recent conversations: ${response.status}`);
       }
@@ -361,20 +411,25 @@ export function useSidebarController({
         setIsLoadingMoreRecentConversations(false);
       }
     }
-  }, []);
+    // A new filter re-creates this, which reloads the open Conversations tab
+    // through the effect below.
+  }, [providerFilter]);
 
   const reloadRecentConversations = useCallback(() => {
     void fetchRecentConversationsPage(0, false);
   }, [fetchRecentConversationsPage]);
 
   const loadMoreRecentConversations = useCallback(() => {
-    if (isLoadingMoreRecentConversations || !recentConversationsHasMore) {
+    // While a reload is out (a new filter, say) the loaded rows are about to be
+    // replaced, so their count is no offset to continue from.
+    if (isLoadingMoreRecentConversations || isRecentConversationsLoading || !recentConversationsHasMore) {
       return;
     }
     void fetchRecentConversationsPage(recentConversations.length, true);
   }, [
     fetchRecentConversationsPage,
     isLoadingMoreRecentConversations,
+    isRecentConversationsLoading,
     recentConversations.length,
     recentConversationsHasMore,
   ]);
@@ -484,6 +539,44 @@ export function useSidebarController({
     return changed ? next : recentConversations;
   }, [projects, recentConversations]);
 
+  // Rows fetched before the agent filter changed stay in state until the reload
+  // lands; they are hidden meanwhile. The rows are returned as-is when all of
+  // them fit, so the list does not re-render for nothing.
+  const visibleRecentConversations = useMemo(() => {
+    if (providerFilter === 'all') {
+      return recentConversationsWithCurrentTitles;
+    }
+    const matching = recentConversationsWithCurrentTitles.filter(
+      (conversation) => matchesSessionProviderFilter(conversation.provider, providerFilter),
+    );
+    return matching.length === recentConversationsWithCurrentTitles.length
+      ? recentConversationsWithCurrentTitles
+      : matching;
+  }, [providerFilter, recentConversationsWithCurrentTitles]);
+
+  // Search hits of another agent are dropped the same way; the server leaves
+  // them out already, unless the filter changed while results were streaming.
+  const visibleConversationResults = useMemo(() => {
+    if (!conversationResults || providerFilter === 'all') {
+      return conversationResults;
+    }
+    return {
+      ...conversationResults,
+      titleResults: conversationResults.titleResults.filter(
+        (result) => matchesSessionProviderFilter(result.provider, providerFilter),
+      ),
+      results: conversationResults.results
+        .map((projectResult) => ({
+          ...projectResult,
+          sessions: projectResult.sessions.filter((session) => matchesSessionProviderFilter(
+            session.provider || session.matches[0]?.provider,
+            providerFilter,
+          )),
+        }))
+        .filter((projectResult) => projectResult.sessions.length > 0),
+    };
+  }, [conversationResults, providerFilter]);
+
   useEffect(() => {
     if (searchMode !== 'archived') {
       return;
@@ -558,7 +651,7 @@ export function useSidebarController({
       return;
     }
 
-    const url = api.searchConversationsUrl(query);
+    const url = api.searchConversationsUrl(query, 50, providerFilter);
     const es = new EventSource(url);
     eventSourceRef.current = es;
 
@@ -650,7 +743,7 @@ export function useSidebarController({
         eventSourceRef.current = null;
       }
     };
-  }, [debouncedSearchQuery, searchMode]);
+  }, [debouncedSearchQuery, providerFilter, searchMode]);
 
   // All sidebar state keys (expanded, starred, loading, etc.) use the DB
   // `projectId` as their identifier after the migration.
@@ -837,12 +930,19 @@ export function useSidebarController({
     [projectSortOrder, projectsWithResolvedStarState],
   );
 
+  // Every view below starts from these, so a project with none of the chosen
+  // agent's sessions is gone from all of them.
+  const providerFilteredProjects = useMemo(
+    () => narrowProjectsToProvider(sortedProjects, providerFilter),
+    [providerFilter, sortedProjects],
+  );
+
   const runningProjects = useMemo(() => {
     if (activeSessionIds.size === 0) {
       return [];
     }
 
-    return sortedProjects.reduce<Project[]>((acc, project) => {
+    return providerFilteredProjects.reduce<Project[]>((acc, project) => {
       const sessions = (project.sessions ?? []).filter((session) => activeSessionIds.has(String(session.id)));
       const runningCount = sessions.length;
 
@@ -861,20 +961,41 @@ export function useSidebarController({
       });
       return acc;
     }, []);
-  }, [activeSessionIds, sortedProjects]);
+  }, [activeSessionIds, providerFilteredProjects]);
+
+  // Unfiltered, every busy session counts, listed or not. Narrowed to one
+  // agent, only that agent's can be told apart: the ones in its listed rows.
+  const runningSessionsCount = providerFilter === 'all'
+    ? activeSessionIds.size
+    : runningProjects.reduce((count, project) => count + (project.sessions?.length ?? 0), 0);
 
   const filteredProjects = useMemo(
-    () => filterProjects(searchMode === 'running' ? runningProjects : sortedProjects, debouncedSearchQuery),
-    [debouncedSearchQuery, runningProjects, searchMode, sortedProjects],
+    () => filterProjects(searchMode === 'running' ? runningProjects : providerFilteredProjects, debouncedSearchQuery),
+    [debouncedSearchQuery, providerFilteredProjects, runningProjects, searchMode],
+  );
+
+  // The archive narrowed to the chosen agent, before the search box applies.
+  // Archived projects keep their sessions of every agent, so they are narrowed
+  // like active ones.
+  const providerArchivedSessions = useMemo(
+    () => (providerFilter === 'all'
+      ? archivedSessions
+      : archivedSessions.filter((session) => matchesSessionProviderFilter(session.provider, providerFilter))),
+    [archivedSessions, providerFilter],
+  );
+
+  const providerArchivedProjects = useMemo(
+    () => narrowProjectsToProvider(archivedProjects, providerFilter),
+    [archivedProjects, providerFilter],
   );
 
   const filteredArchivedSessions = useMemo(() => {
     const normalizedSearch = debouncedSearchQuery.trim().toLowerCase();
     if (!normalizedSearch) {
-      return archivedSessions;
+      return providerArchivedSessions;
     }
 
-    return archivedSessions.filter((session) => {
+    return providerArchivedSessions.filter((session) => {
       const searchableFields = [
         session.sessionTitle,
         session.projectDisplayName,
@@ -884,15 +1005,15 @@ export function useSidebarController({
 
       return searchableFields.some((value) => value.toLowerCase().includes(normalizedSearch));
     });
-  }, [archivedSessions, debouncedSearchQuery]);
+  }, [debouncedSearchQuery, providerArchivedSessions]);
 
   const filteredArchivedProjects = useMemo(() => {
     const normalizedSearch = debouncedSearchQuery.trim().toLowerCase();
     if (!normalizedSearch) {
-      return archivedProjects;
+      return providerArchivedProjects;
     }
 
-    return archivedProjects.filter((project) => {
+    return providerArchivedProjects.filter((project) => {
       const projectMatches = [
         project.displayName,
         project.fullPath || '',
@@ -916,7 +1037,7 @@ export function useSidebarController({
         ].some((value) => value.toLowerCase().includes(normalizedSearch));
       });
     });
-  }, [archivedProjects, debouncedSearchQuery]);
+  }, [debouncedSearchQuery, providerArchivedProjects]);
 
   // Keyed by projectId so the rename survives display-name mutations that arrive
   // while the input is open.
@@ -1208,13 +1329,29 @@ export function useSidebarController({
 
   const requestProjectDelete = useCallback(
     (project: Project) => {
-      setPendingDeletion({
-        kind: 'project',
-        project,
-        sessionCount: getProjectSessions(project).length,
-      });
+      const loadedCount = getProjectSessions(project).length;
+      if (providerFilter === 'all') {
+        setPendingDeletion({ kind: 'project', project, sessionCount: loadedCount });
+        return;
+      }
+
+      // The row lists one agent's sessions, but deleting the project removes
+      // every agent's, so the dialog warns with the count of all of them.
+      void (async () => {
+        let sessionCount = loadedCount;
+        try {
+          const response = await api.projectSessions(project.projectId, { limit: 1, offset: 0 });
+          if (response.ok) {
+            const page = (await response.json()) as { sessionMeta?: { total?: number } };
+            sessionCount = Math.max(loadedCount, Number(page.sessionMeta?.total ?? loadedCount));
+          }
+        } catch (error) {
+          console.error('[Sidebar] Failed to count the sessions of the project to delete:', error);
+        }
+        setPendingDeletion({ kind: 'project', project, sessionCount });
+      })();
     },
-    [getProjectSessions],
+    [getProjectSessions, providerFilter],
   );
 
   const confirmDeleteProject = useCallback(async (deleteData = false) => {
@@ -1445,9 +1582,9 @@ export function useSidebarController({
     runningSessionsCount,
     archivedProjects: filteredArchivedProjects,
     archivedSessions: filteredArchivedSessions,
-    archivedSessionsCount: archivedProjects.length + archivedSessions.length,
+    archivedSessionsCount: providerArchivedProjects.length + providerArchivedSessions.length,
     isArchivedSessionsLoading,
-    recentConversations: recentConversationsWithCurrentTitles,
+    recentConversations: visibleRecentConversations,
     recentConversationsTotal,
     recentConversationsHasMore,
     isRecentConversationsLoading,
@@ -1489,7 +1626,7 @@ export function useSidebarController({
     setShowNewProject,
     searchMode,
     setSearchMode: changeSearchMode,
-    conversationResults,
+    conversationResults: visibleConversationResults,
     isSearching,
     searchProgress,
     clearConversationResults: useCallback(() => {

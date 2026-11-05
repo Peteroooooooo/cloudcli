@@ -3,7 +3,7 @@ import { Activity, Archive, Eraser, Folder, MessageSquare, RotateCcw, Search, Tr
 import type { TFunction } from 'i18next';
 
 import { LLMProviderLogo, ScrollArea } from '@/shared/ui';
-import type { ArchivedProjectListItem, ArchivedSessionListItem, ConversationSearchResults, Project, RecentConversationListItem, ReleaseInfo, SearchProgress, SidebarProjectListProps, SidebarSearchMode } from '@/shared/types';
+import type { ArchivedProjectListItem, ArchivedSessionListItem, ConversationSearchResults, LLMProvider, Project, RecentConversationListItem, ReleaseInfo, SearchProgress, SessionProviderFilter, SidebarProjectListProps, SidebarSearchMode } from '@/shared/types';
 import { formatCompactAge, getAllSessions } from '@/modules/sidebar/utils/sidebarProjectFormatting';
 import SidebarFooter from '@/modules/sidebar/SidebarFooter';
 import SidebarHeader from '@/modules/sidebar/SidebarHeader';
@@ -102,6 +102,10 @@ type SidebarContentProps = {
   onClearSearchFilter: () => void;
   searchMode: SidebarSearchMode;
   onSearchModeChange: (mode: SidebarSearchMode) => void;
+  providerFilter: SessionProviderFilter;
+  /** The agents the agent filter offers after "All". */
+  providerFilterOptions: LLMProvider[];
+  onProviderFilterChange: (filter: SessionProviderFilter) => void;
   conversationResults: ConversationSearchResults | null;
   isSearching: boolean;
   searchProgress: SearchProgress | null;
@@ -153,6 +157,9 @@ export default function SidebarContent({
   onClearSearchFilter,
   searchMode,
   onSearchModeChange,
+  providerFilter,
+  providerFilterOptions,
+  onProviderFilterChange,
   conversationResults,
   isSearching,
   searchProgress,
@@ -205,6 +212,9 @@ export default function SidebarContent({
         onClearSearchFilter={onClearSearchFilter}
         searchMode={searchMode}
         onSearchModeChange={onSearchModeChange}
+        providerFilter={providerFilter}
+        providerFilterOptions={providerFilterOptions}
+        onProviderFilterChange={onProviderFilterChange}
         onRefresh={onRefresh}
         isRefreshing={isRefreshing}
         onCreateProject={onCreateProject}

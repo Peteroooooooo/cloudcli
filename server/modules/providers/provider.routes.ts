@@ -20,7 +20,7 @@ import type {
   ProviderSkillCreateInput,
   UpsertProviderMcpServerInput,
 } from '@/shared/types.js';
-import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
+import { AppError, asyncHandler, createApiSuccessResponse, parseSessionProviderFilter } from '@/shared/utils.js';
 
 const router = express.Router();
 
@@ -907,8 +907,21 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const limit = parseBoundedIntegerQuery(req.query.limit, 'limit', 40, 1, 100);
     const offset = parseBoundedIntegerQuery(req.query.offset, 'offset', 0, 0);
-    const page = sessionsService.listRecentSessions(limit, offset);
+    const provider = parseSessionProviderFilter(req.query.provider);
+    const page = sessionsService.listRecentSessions(limit, offset, provider);
     res.json(createApiSuccessResponse(page));
+  }),
+);
+
+/**
+ * Sessions per provider, archived ones included, for the sidebar's agent
+ * filter: `{ success: true, data: { counts: { claude: 175, codex: 8 } } }`.
+ * Providers without sessions are absent.
+ */
+router.get(
+  '/sessions/provider-counts',
+  asyncHandler(async (_req: Request, res: Response) => {
+    res.json(createApiSuccessResponse({ counts: sessionsService.countSessionsByProvider() }));
   }),
 );
 
@@ -1034,6 +1047,7 @@ router.get(
 router.get('/search/sessions', asyncHandler(async (req: Request, res: Response) => {
   const query = parseSessionSearchQuery(req.query.q);
   const limit = parseSessionSearchLimit(req.query.limit);
+  const provider = parseSessionProviderFilter(req.query.provider);
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -1053,6 +1067,7 @@ router.get('/search/sessions', asyncHandler(async (req: Request, res: Response) 
     await sessionConversationsSearchService.search({
       query,
       limit,
+      provider,
       signal: abortController.signal,
       onTitleResults: (titleResults) => {
         if (!closed) {

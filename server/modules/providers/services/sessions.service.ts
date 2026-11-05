@@ -203,10 +203,11 @@ export const sessionsService = {
   },
 
   /**
-   * Returns the active conversation feed in true global activity order.
+   * Returns the active conversation feed in true global activity order;
+   * `provider` narrows the page and its total to one provider.
    */
-  listRecentSessions(limit: number, offset: number): RecentSessionsPage {
-    const page = sessionsDb.getRecentSessionsPage(limit, offset);
+  listRecentSessions(limit: number, offset: number, provider: LLMProvider | null = null): RecentSessionsPage {
+    const page = sessionsDb.getRecentSessionsPage(limit, offset, provider);
     const projectCache = new Map<string, ReturnType<typeof projectsDb.getProjectPath>>();
     const conversations = page.sessions.map((session) => {
       const projectPath = session.project_path?.trim() ? session.project_path : null;
@@ -234,6 +235,23 @@ export const sessionsService = {
       total: page.total,
       hasMore: offset + conversations.length < page.total,
     };
+  },
+
+  /**
+   * Session count per provider for the sidebar's agent filter, which shows a
+   * segment only for agents that have sessions. Archived sessions and those of
+   * archived projects are counted too, because the filter also narrows the
+   * Archive view. Providers with no sessions are left out, e.g.
+   * `{ claude: 175, codex: 8 }`.
+   */
+  countSessionsByProvider(): Partial<Record<LLMProvider, number>> {
+    const counts: Partial<Record<LLMProvider, number>> = {};
+    for (const { provider, count } of sessionsDb.countSessionsByProvider()) {
+      if (count > 0) {
+        counts[provider as LLMProvider] = count;
+      }
+    }
+    return counts;
   },
 
   /**

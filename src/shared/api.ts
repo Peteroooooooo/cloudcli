@@ -4,6 +4,7 @@ import {
   storeAuthToken,
 } from '@/shared/authToken';
 import { IS_PLATFORM } from '@/shared/utils';
+import type { SessionProviderFilter } from '@/shared/types';
 import { readVoiceConfig, voiceConfigHeaders } from '@/shared/voiceConfig';
 
 // Headers are a plain record rather than the full `HeadersInit` union so the
@@ -77,6 +78,11 @@ const query = (params: Record<string, QueryValue>): string => {
   const serialized = search.toString();
   return serialized ? `?${serialized}` : '';
 };
+
+// The `provider` query value for an agent filter; `all` sends none, which the
+// server reads as every provider.
+const providerQueryValue = (provider: SessionProviderFilter): string | null =>
+  provider === 'all' ? null : provider;
 
 /**
  * Reads a `{ success, error, details }` envelope response, throwing the server's
@@ -219,15 +225,19 @@ export const api = {
   // config endpoint removed - no longer needed (frontend uses window.location)
   // After the projectName → projectId migration the path/query identifier is
   // the DB-assigned `projectId`; parameter names reflect that for clarity.
-  projects: () => get('/api/projects'),
+  // `provider` narrows each project's session page and total to one agent.
+  // `skipSync` answers from the DB without re-scanning the provider transcripts
+  // first, for refetches that only change what is shown.
+  projects: ({ provider = 'all', skipSync = false }: { provider?: SessionProviderFilter; skipSync?: boolean } = {}) =>
+    get(`/api/projects${query({ provider: providerQueryValue(provider), skipSync: skipSync ? 1 : null })}`),
   archivedProjects: () => get('/api/projects/archived'),
   projectSessions: (
     projectId: string,
-    { limit = 20, offset = 0 }: { limit?: number; offset?: number } = {},
+    { limit = 20, offset = 0, provider = 'all' }: { limit?: number; offset?: number; provider?: SessionProviderFilter } = {},
     options: ApiRequestOptions = {},
   ) =>
     get(
-      `/api/projects/${encodeURIComponent(projectId)}/sessions${query({ limit, offset })}`,
+      `/api/projects/${encodeURIComponent(projectId)}/sessions${query({ limit, offset, provider: providerQueryValue(provider) })}`,
       options,
     ),
   projectTaskmaster: (projectId: string) =>
@@ -257,10 +267,11 @@ export const api = {
   // a query parameter on the streaming endpoints below.
   cloneProjectProgressUrl: ({ cloneId }: { cloneId: string }) =>
     `/api/projects/clone-progress${query({ cloneId, token: getStoredAuthToken() })}`,
-  searchConversationsUrl: (searchQuery: string, limit = 50) =>
+  searchConversationsUrl: (searchQuery: string, limit = 50, provider: SessionProviderFilter = 'all') =>
     `/api/providers/search/sessions${query({
       q: searchQuery,
       limit,
+      provider: providerQueryValue(provider),
       token: getStoredAuthToken(),
     })}`,
 
@@ -281,8 +292,12 @@ export const api = {
   sessionDetails: (sessionId: string) =>
     get(`/api/providers/sessions/${encodeURIComponent(sessionId)}`),
   runningSessions: () => get('/api/providers/sessions/running'),
-  recentConversations: ({ limit = 40, offset = 0 }: { limit?: number; offset?: number } = {}) =>
-    get(`/api/providers/sessions/recent${query({ limit, offset })}`),
+  recentConversations: (
+    { limit = 40, offset = 0, provider = 'all' }: { limit?: number; offset?: number; provider?: SessionProviderFilter } = {},
+  ) =>
+    get(`/api/providers/sessions/recent${query({ limit, offset, provider: providerQueryValue(provider) })}`),
+  // Sessions per provider, archived ones included: `{ data: { counts: { claude: 175 } } }`.
+  sessionProviderCounts: () => get('/api/providers/sessions/provider-counts'),
   providerSessionId: (sessionId: string) =>
     get(`/api/providers/sessions/${encodeURIComponent(sessionId)}/provider-id`),
   restoreSession: (sessionId: string) => post(`/api/providers/sessions/${sessionId}/restore`),

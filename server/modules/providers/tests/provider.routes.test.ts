@@ -596,3 +596,93 @@ test('the workflow agent route reads an agent\'s timeline and status from its ru
     assert.equal(missing.error.code, 'WORKFLOW_AGENT_NOT_FOUND');
   });
 });
+
+test('the recent-sessions route narrows the feed and its total to the requested provider', async () => {
+  await withProviderServer(async (baseUrl, workspacePath) => {
+    sessionsDb.createSession('recent-claude-1', 'claude', workspacePath, 'Claude 1', '2026-11-01T09:00:00.000Z', '2026-11-01T09:00:00.000Z');
+    sessionsDb.createSession('recent-codex-1', 'codex', workspacePath, 'Codex 1', '2026-11-01T10:00:00.000Z', '2026-11-01T10:00:00.000Z');
+    sessionsDb.createSession('recent-claude-2', 'claude', workspacePath, 'Claude 2', '2026-11-01T11:00:00.000Z', '2026-11-01T11:00:00.000Z');
+    sessionsDb.createSession('recent-codex-2', 'codex', workspacePath, 'Codex 2', '2026-11-01T12:00:00.000Z', '2026-11-01T12:00:00.000Z');
+
+    type RecentPage = {
+      data: { conversations: Array<{ sessionId: string; provider: string }>; total: number; hasMore: boolean };
+    };
+    const readPage = async (query: string) => {
+      const response = await fetch(`${baseUrl}/api/providers/sessions/recent?${query}`);
+      return { status: response.status, payload: await response.json() as RecentPage };
+    };
+
+    const codexFirst = await readPage('provider=codex&limit=1&offset=0');
+    assert.equal(codexFirst.status, 200);
+    assert.deepEqual(codexFirst.payload.data.conversations.map((row) => row.sessionId), ['recent-codex-2']);
+    assert.equal(codexFirst.payload.data.total, 2);
+    assert.equal(codexFirst.payload.data.hasMore, true);
+
+    const codexSecond = await readPage('provider=codex&limit=1&offset=1');
+    assert.deepEqual(codexSecond.payload.data.conversations.map((row) => row.sessionId), ['recent-codex-1']);
+    assert.equal(codexSecond.payload.data.hasMore, false);
+
+    const everyProvider = await readPage('provider=all&limit=40');
+    assert.equal(everyProvider.payload.data.total, 4);
+
+    const invalid = await fetch(`${baseUrl}/api/providers/sessions/recent?provider=gemini`);
+    const invalidPayload = await invalid.json() as { error: { code: string } };
+    assert.equal(invalid.status, 400);
+    assert.equal(invalidPayload.error.code, 'INVALID_PROVIDER_FILTER');
+  });
+});
+
+test('the provider-counts route counts sessions per provider, archived ones included', async () => {
+  await withProviderServer(async (baseUrl, workspacePath) => {
+    const empty = await fetch(`${baseUrl}/api/providers/sessions/provider-counts`);
+    assert.equal(empty.status, 200);
+    assert.deepEqual((await empty.json() as { data: { counts: unknown } }).data.counts, {});
+
+    sessionsDb.createAppSession('count-claude-1', 'claude', workspacePath);
+    sessionsDb.createAppSession('count-claude-2', 'claude', workspacePath);
+    sessionsDb.createAppSession('count-codex-archived', 'codex', workspacePath);
+    sessionsDb.updateSessionIsArchived('count-codex-archived', true);
+
+    // Registered before `/sessions/:sessionId`, so it is not read as a session id.
+    const response = await fetch(`${baseUrl}/api/providers/sessions/provider-counts`);
+    const payload = await response.json() as { success: boolean; data: { counts: Record<string, number> } };
+    assert.equal(response.status, 200);
+    assert.equal(payload.success, true);
+    assert.deepEqual(payload.data.counts, { claude: 2, codex: 1 });
+  });
+});
+
+test('conversation search keeps to the requested provider and refuses an unknown one', async () => {
+  await withProviderServer(async (baseUrl, workspacePath) => {
+    sessionsDb.createAppSession('search-claude', 'claude', workspacePath, 'Quarterly roadmap review');
+    sessionsDb.createAppSession('search-codex', 'codex', workspacePath, 'Quarterly roadmap draft');
+
+    const readTitleResults = async (query: string) => {
+      const response = await fetch(`${baseUrl}/api/providers/search/sessions?q=quarterly%20roadmap&limit=50${query}`);
+      const eventStream = await response.text();
+      const titleEventIndex = eventStream.indexOf('event: title-results');
+      assert.equal(response.status, 200);
+      assert.ok(titleEventIndex >= 0);
+      assert.ok(eventStream.includes('event: done'));
+      const dataLine = eventStream
+        .slice(titleEventIndex)
+        .split('\n')
+        .find((line) => line.startsWith('data: '));
+      assert.ok(dataLine);
+      const { titleResults } = JSON.parse(dataLine.slice('data: '.length)) as {
+        titleResults: Array<{ sessionId: string; provider: string }>;
+      };
+      return titleResults.map((result) => `${result.provider}:${result.sessionId}`).sort();
+    };
+
+    assert.deepEqual(await readTitleResults('&provider=codex'), ['codex:search-codex']);
+    assert.deepEqual(await readTitleResults('&provider=claude'), ['claude:search-claude']);
+    assert.deepEqual(await readTitleResults(''), ['claude:search-claude', 'codex:search-codex']);
+
+    // Refused before the event stream opens, as a plain JSON error.
+    const invalid = await fetch(`${baseUrl}/api/providers/search/sessions?q=quarterly&provider=gemini`);
+    const invalidPayload = await invalid.json() as { error: { code: string } };
+    assert.equal(invalid.status, 400);
+    assert.equal(invalidPayload.error.code, 'INVALID_PROVIDER_FILTER');
+  });
+});

@@ -6,6 +6,7 @@ import { spawn } from 'cross-spawn';
 import { rgPath } from '@vscode/ripgrep';
 
 import { isClaudeNonTurnMessageRow, stripAnsiSequences } from '@/shared/utils.js';
+import type { LLMProvider } from '@/shared/types.js';
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 
 type AnyRecord = Record<string, any>;
@@ -58,6 +59,8 @@ export type SessionConversationSearchProgressUpdate = {
 type SearchSessionConversationsInput = {
   query: string;
   limit: number;
+  /** Searches only this provider's sessions; null or absent searches every provider. */
+  provider?: LLMProvider | null;
   signal?: AbortSignal;
   onTitleResults?: (results: SessionTitleSearchResult[]) => void;
   onProgress?: (update: SessionConversationSearchProgressUpdate) => void;
@@ -1149,6 +1152,7 @@ export async function searchConversations(
   onProjectResult: ((update: SessionConversationSearchProgressUpdate) => void) | null = null,
   signal: AbortSignal | null = null,
   onTitleResults: ((results: SessionTitleSearchResult[]) => void) | null = null,
+  provider: LLMProvider | null = null,
 ): Promise<{
   results: ProjectConversationResult[];
   titleResults: SessionTitleSearchResult[];
@@ -1168,7 +1172,10 @@ export async function searchConversations(
     return { results: [], titleResults: [], totalMatches: 0, query: safeQuery };
   }
 
-  const activeSessions = sessionsDb.getAllSessions();
+  // Narrowed before either pass so the result limit is spent on that provider.
+  const activeSessions = provider
+    ? sessionsDb.getAllSessions().filter((session) => session.provider === provider)
+    : sessionsDb.getAllSessions();
   const titleResults = findSessionTitleResults(activeSessions, safeQuery, safeLimit);
   onTitleResults?.(titleResults);
 
@@ -1313,6 +1320,7 @@ export const sessionConversationsSearchService = {
       input.onProgress ?? null,
       input.signal ?? null,
       input.onTitleResults ?? null,
+      input.provider ?? null,
     );
   },
 };

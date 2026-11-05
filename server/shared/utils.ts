@@ -25,6 +25,7 @@ import type {
   ApiSuccessShape,
   AppErrorOptions,
   CliVersionProbe,
+  LLMProvider,
   NormalizedMessage,
   ProviderCurrentActiveModel,
   ProviderModelsDefinition,
@@ -90,6 +91,43 @@ export function asyncHandler(
   return (req, res, next) => {
     void Promise.resolve(handler(req, res, next)).catch(next);
   };
+}
+
+// ---------------------------
+//----------------- SESSION PROVIDER FILTER ------------
+/** Provider ids a session list can be filtered to; matches `LLMProvider`. */
+const SESSION_PROVIDER_FILTER_VALUES: readonly LLMProvider[] = ['claude', 'codex', 'cursor', 'opencode'];
+
+/**
+ * Reads the optional `provider` query parameter of the session list endpoints
+ * (`GET /api/projects`, `/api/projects/:projectId/sessions`,
+ * `/api/providers/sessions/recent` and `/api/providers/search/sessions`).
+ *
+ * Returns the provider to filter to, or null for "every provider" when the
+ * parameter is absent, empty or `all`. The value is trimmed and lower-cased;
+ * anything that is not a known provider id is rejected with a 400 so a typo
+ * cannot silently show an unfiltered list.
+ */
+export function parseSessionProviderFilter(value: unknown): LLMProvider | null {
+  const rawValue = typeof value === 'string'
+    ? value
+    : Array.isArray(value) && typeof value[0] === 'string'
+      ? value[0]
+      : '';
+  const normalized = rawValue.trim().toLowerCase();
+  if (!normalized || normalized === 'all') {
+    return null;
+  }
+
+  const provider = SESSION_PROVIDER_FILTER_VALUES.find((candidate) => candidate === normalized);
+  if (!provider) {
+    throw new AppError(`Unsupported provider filter "${normalized}".`, {
+      code: 'INVALID_PROVIDER_FILTER',
+      statusCode: 400,
+    });
+  }
+
+  return provider;
 }
 
 // ---------------------------

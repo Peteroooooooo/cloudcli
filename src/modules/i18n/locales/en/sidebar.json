@@ -144,6 +144,10 @@
     "projectsScanned_one": "{{count}} project scanned",
     "projectsScanned_other": "{{count}} projects scanned"
   },
+  "providerFilter": {
+    "label": "Filter sessions by agent",
+    "all": "All"
+  },
   "recent": {
     "title": "Recent conversations",
     "emptyTitle": "No conversations yet",
@@ -181,6 +185,7 @@
     "open": "Clean up old sessions",
     "title": "Clean up old sessions",
     "description": "Sessions idle for {{days}} days or more, archived ones included. Starred projects and running sessions are not listed.",
+    "providerOnly": "Only {{agent}} sessions are listed.",
     "permanentNotice": "Deleting also removes the session from Claude Code or Codex (transcript, side files, Codex's own records). It cannot be undone.",
     "idleFor": "Idle for at least",
     "days_one": "{{count}} day",

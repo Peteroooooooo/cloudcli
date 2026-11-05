@@ -1,7 +1,15 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
-import type { Project, ProjectSession, QuickSettingsTab, SlashCommand } from '@/shared/types';
+import type {
+  LLMProvider,
+  Project,
+  ProjectSession,
+  QuickSettingsTab,
+  SessionProviderCounts,
+  SessionProviderFilter,
+  SlashCommand,
+} from '@/shared/types';
 
 //----------------- DEPLOYMENT MODE ------------
 
@@ -250,3 +258,42 @@ export const getQuickSettingsTabId = (tab: QuickSettingsTab): string => `quick-s
 
 /** DOM id of the tabpanel a quick settings tab controls; pairs with `getQuickSettingsTabId`. */
 export const getQuickSettingsTabPanelId = (tab: QuickSettingsTab): string => `quick-settings-tabpanel-${tab}`;
+
+// ---------------------------
+
+//----------------- SESSION PROVIDER FILTER ------------
+
+/** The agents the sidebar's agent filter can select, in the order its segments are drawn. Private to the helpers below. */
+const SESSION_PROVIDER_FILTER_ORDER: readonly LLMProvider[] = ['claude', 'codex', 'cursor', 'opencode'];
+
+/**
+ * Reads an unchecked value, such as the one kept in localStorage, as an agent
+ * filter. Anything that is not a known provider reads as `all`, so a stale or
+ * hand-edited value can never hide every session.
+ */
+export const parseSessionProviderFilter = (value: unknown): SessionProviderFilter => {
+  const provider = SESSION_PROVIDER_FILTER_ORDER.find((candidate) => candidate === value);
+  return provider ?? 'all';
+};
+
+/**
+ * The providers that have at least one session, in the agent filter's order.
+ * The filter draws one segment per entry after "All", and falls back to "All"
+ * when the selected provider is not among them.
+ */
+export const listProvidersWithSessions = (counts: SessionProviderCounts): LLMProvider[] =>
+  SESSION_PROVIDER_FILTER_ORDER.filter((provider) => (counts[provider] ?? 0) > 0);
+
+/**
+ * Whether a session of `provider` belongs in a list narrowed by `filter`. A
+ * session without a provider counts as Claude's, as everywhere else in the
+ * sidebar. The server already filters the lists; this is the render-time guard
+ * that keeps another agent's rows out of them, whatever reached local state.
+ */
+export const matchesSessionProviderFilter = (provider: unknown, filter: SessionProviderFilter): boolean => {
+  if (filter === 'all') {
+    return true;
+  }
+  const sessionProvider = typeof provider === 'string' && provider.trim() ? provider : 'claude';
+  return sessionProvider === filter;
+};

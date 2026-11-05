@@ -166,3 +166,55 @@ test('recent sessions are globally ordered, paginated, and limited to visible co
     );
   });
 });
+
+test('the provider argument narrows recent and project pages and their totals', async () => {
+  await withIsolatedDatabase(() => {
+    const fixtures: Array<Parameters<typeof sessionsDb.createSession>> = [
+      ['claude-old', 'claude', '/workspace/project-a', 'Claude old', '2026-07-18T09:00:00.000Z', '2026-07-18T09:00:00.000Z'],
+      ['codex-old', 'codex', '/workspace/project-a', 'Codex old', '2026-07-18T10:00:00.000Z', '2026-07-18T10:00:00.000Z'],
+      ['claude-new', 'claude', '/workspace/project-b', 'Claude new', '2026-07-18T11:00:00.000Z', '2026-07-18T11:00:00.000Z'],
+      ['codex-new', 'codex', '/workspace/project-a', 'Codex new', '2026-07-18T12:00:00.000Z', '2026-07-18T12:00:00.000Z'],
+      ['codex-archived', 'codex', '/workspace/project-a', 'Codex archived', '2026-07-18T13:00:00.000Z', '2026-07-18T13:00:00.000Z'],
+    ];
+    fixtures.forEach((fixture) => sessionsDb.createSession(...fixture));
+    sessionsDb.updateSessionIsArchived('codex-archived', true);
+
+    const codexRecent = sessionsDb.getRecentSessionsPage(1, 0, 'codex');
+    assert.equal(codexRecent.total, 2);
+    assert.deepEqual(codexRecent.sessions.map((session) => session.session_id), ['codex-new']);
+    assert.deepEqual(
+      sessionsDb.getRecentSessionsPage(1, 1, 'codex').sessions.map((session) => session.session_id),
+      ['codex-old'],
+    );
+    assert.equal(sessionsDb.getRecentSessionsPage(10, 0, 'cursor').total, 0);
+    assert.equal(sessionsDb.getRecentSessionsPage(10, 0).total, 4, 'no provider lists every provider');
+
+    assert.deepEqual(
+      sessionsDb.getSessionsByProjectPathPage('/workspace/project-a', 10, 0, 'codex').map((session) => session.session_id),
+      ['codex-new', 'codex-old'],
+    );
+    assert.deepEqual(
+      sessionsDb.getSessionsByProjectPathPage('/workspace/project-a', 10, 0, 'claude').map((session) => session.session_id),
+      ['claude-old'],
+    );
+    assert.equal(sessionsDb.countSessionsByProjectPath('/workspace/project-a', 'codex'), 2);
+    assert.equal(sessionsDb.countSessionsByProjectPath('/workspace/project-a', 'claude'), 1);
+    assert.equal(sessionsDb.countSessionsByProjectPath('/workspace/project-a'), 3);
+  });
+});
+
+test('countSessionsByProvider counts archived sessions and archived projects too', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createSession('claude-1', 'claude', '/workspace/project-a', 'Claude 1');
+    sessionsDb.createSession('claude-2', 'claude', '/workspace/project-a', 'Claude 2');
+    sessionsDb.createSession('codex-archived', 'codex', '/workspace/project-a', 'Codex archived');
+    sessionsDb.updateSessionIsArchived('codex-archived', true);
+    sessionsDb.createSession('cursor-hidden-project', 'cursor', '/workspace/project-hidden', 'Cursor');
+    projectsDb.updateProjectIsArchived('/workspace/project-hidden', true);
+
+    const counts = Object.fromEntries(
+      sessionsDb.countSessionsByProvider().map(({ provider, count }) => [provider, count]),
+    );
+    assert.deepEqual(counts, { claude: 2, codex: 1, cursor: 1 });
+  });
+});

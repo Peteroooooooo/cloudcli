@@ -5,11 +5,12 @@ import { useDeviceSettings } from '@/shared/hooks/useDeviceSettings';
 import { useVersionCheck } from '@/shared/hooks/useVersionCheck';
 import { useUiPreferences, useSetUiPreference } from '@/shared/context/UiPreferencesContext';
 import { useSidebarController } from '@/modules/sidebar/hooks/useSidebarController';
+import { useProviderFilterOptions } from '@/modules/sidebar/hooks/useProviderFilterOptions';
 import { useTaskMaster, useTasksSettings } from '@/modules/task-master';
 import { usePaletteOps } from '@/modules/command-palette';
 import { useBackgroundSessionIdSet, useBusySessionIdSet } from '@/shared/context/SessionProtectionContext';
 import { useWebSocket } from '@/shared/context/WebSocketContext';
-import type { LLMProvider, LoadingProgress, MCPServerStatus, Project, ProjectSession, SidebarProjectListProps } from '@/shared/types';
+import type { LLMProvider, LoadingProgress, MCPServerStatus, Project, ProjectSession, SessionProviderFilter, SidebarProjectListProps } from '@/shared/types';
 import SidebarCollapsed from '@/modules/sidebar/SidebarCollapsed';
 import SidebarContent from '@/modules/sidebar/SidebarContent';
 import SidebarModals from '@/modules/sidebar/SidebarModals';
@@ -20,6 +21,9 @@ type SidebarProps = {
   selectedProject: Project | null;
   selectedSession: ProjectSession | null;
   attentionSessionIds: ReadonlySet<string>;
+  /** The agent the lists are narrowed to; kept by useProjectsState, which fetches the projects under it. */
+  providerFilter: SessionProviderFilter;
+  onProviderFilterChange: (filter: SessionProviderFilter) => void;
   onProjectSelect: (project: Project) => void;
   onSessionSelect: (session: ProjectSession) => void;
   onNewSession: (project: Project) => void;
@@ -49,6 +53,8 @@ function Sidebar({
   selectedProject,
   selectedSession,
   attentionSessionIds,
+  providerFilter,
+  onProviderFilterChange,
   onProjectSelect,
   onSessionSelect,
   onNewSession,
@@ -82,6 +88,22 @@ function Sidebar({
   const backgroundSessionIds = useBackgroundSessionIdSet();
   const { subscribe } = useWebSocket();
   const [showStaleCleanup, setShowStaleCleanup] = useState(false);
+  const { providerFilterOptions, refreshCountsSoon } = useProviderFilterOptions({
+    providerFilter,
+    onProviderFilterChange,
+    subscribe,
+  });
+
+  // A delete can take an agent's last session, so the counts are asked for again.
+  const handleSessionDeleted = useCallback((sessionId: string) => {
+    onSessionDelete?.(sessionId);
+    refreshCountsSoon();
+  }, [onSessionDelete, refreshCountsSoon]);
+
+  const handleProjectDeleted = useCallback((projectId: string) => {
+    onProjectDelete?.(projectId);
+    refreshCountsSoon();
+  }, [onProjectDelete, refreshCountsSoon]);
 
   const {
     isSidebarCollapsed,
@@ -163,14 +185,15 @@ function Sidebar({
     onRefresh,
     onProjectSelect,
     onSessionSelect,
-    onSessionDelete,
+    onSessionDelete: handleSessionDeleted,
     onLoadMoreSessions,
-    onProjectDelete,
+    onProjectDelete: handleProjectDeleted,
     setCurrentProject,
     setSidebarVisible: (visible) => setPreference('sidebarVisible', visible),
     sidebarVisible,
     keepProjectsExpanded: preferences.keepProjectsExpanded,
     subscribe,
+    providerFilter,
   });
 
   useEffect(() => {
@@ -272,6 +295,7 @@ function Sidebar({
           onClose={() => setShowStaleCleanup(false)}
           onDeleteSessions={deleteSessionsPermanently}
           currentTime={currentTime}
+          providerFilter={providerFilter}
           t={t}
         />
       )}
@@ -311,6 +335,9 @@ function Sidebar({
               setSearchMode(mode);
               if (mode === 'projects') clearConversationResults();
             }}
+            providerFilter={providerFilter}
+            providerFilterOptions={providerFilterOptions}
+            onProviderFilterChange={onProviderFilterChange}
             conversationResults={conversationResults}
             isSearching={isSearching}
             searchProgress={searchProgress}
