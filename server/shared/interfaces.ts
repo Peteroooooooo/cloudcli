@@ -81,6 +81,33 @@ export interface IProvider {
    * stays inside CloudCLI.
    */
   readonly sessionTitle?: IProviderSessionTitle;
+  /**
+   * Removes a session from the provider's own storage. Present only for
+   * providers that keep more than the transcript file (side folders, their own
+   * databases); without it a permanent delete removes the transcript alone.
+   */
+  readonly sessionDeletion?: IProviderSessionDeletion;
+}
+
+// ---------------------------
+//----------------- PROVIDER SESSION DELETION INTERFACE ------------
+/**
+ * Permanent-delete contract for one provider.
+ */
+export interface IProviderSessionDeletion {
+  /**
+   * Removes everything the provider keeps for one of its sessions, so the
+   * provider's own session list and resume picker no longer offer it.
+   *
+   * Resolves when nothing is left, including when the provider no longer knew
+   * the session. Rejects when something could not be removed; the caller then
+   * keeps its row so the delete can be retried.
+   */
+  deleteSession(input: {
+    /** Null for a session CloudCLI created that never ran. */
+    providerSessionId: string | null;
+    jsonlPath: string | null;
+  }): Promise<void>;
 }
 
 // ---------------------------

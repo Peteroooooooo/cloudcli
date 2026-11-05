@@ -1664,6 +1664,20 @@ export type ArchivedSessionListItem = {
   isProjectArchived: boolean;
 };
 
+/** One row of the "clean up old sessions" list. */
+export type StaleSessionListItem = Pick<
+  ArchivedSessionListItem,
+  'sessionId' | 'provider' | 'projectId' | 'projectPath' | 'projectDisplayName' | 'sessionTitle' | 'lastActivity'
+> & {
+  isArchived: boolean;
+};
+
+/** What a permanent bulk delete left behind: the sessions it could not delete, with the reason. */
+export type SessionDeletionFailure = {
+  sessionId: string;
+  message: string;
+};
+
 /** The subset of archived-session fields needed to render a recent-conversations row and reopen the session it points at. */
 export type RecentConversationListItem = Pick<
   ArchivedSessionListItem,

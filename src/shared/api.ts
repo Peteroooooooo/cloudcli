@@ -272,6 +272,10 @@ export const api = {
   deleteSession: (sessionId: string, hardDelete = false) =>
     del(`/api/providers/sessions/${sessionId}${query({ force: hardDelete })}`),
   getArchivedSessions: () => get('/api/providers/sessions/archived'),
+  // Sessions idle for at least `olderThanDays` days, archived ones included;
+  // starred projects and running sessions are left out by the server.
+  staleSessions: (olderThanDays = 7) =>
+    get(`/api/providers/sessions/stale${query({ olderThanDays })}`),
   // Resolves one session (by app id or provider-native id) to its metadata and
   // owning project — used when a /session/<id> URL isn't in loaded payloads.
   sessionDetails: (sessionId: string) =>

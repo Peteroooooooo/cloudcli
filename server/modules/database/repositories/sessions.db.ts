@@ -397,6 +397,23 @@ export const sessionsDb = {
   },
 
   /**
+   * Provider sessions one session has left behind, for a permanent delete that
+   * has to remove each of them from the provider as well as from disk.
+   */
+  getSupersededProviderSessions(sessionId: string): Array<{
+    provider_session_id: string;
+    jsonl_path: string | null;
+  }> {
+    const db = getConnection();
+    return db
+      .prepare(
+        `SELECT provider_session_id, jsonl_path FROM superseded_provider_sessions
+         WHERE session_id = ?`
+      )
+      .all(sessionId) as Array<{ provider_session_id: string; jsonl_path: string | null }>;
+  },
+
+  /**
    * Forgets what a session left behind, once the session itself is gone.
    *
    * Without this the record outlives the row it was written for and keeps the
@@ -589,6 +606,24 @@ export const sessionsDb = {
          ORDER BY datetime(COALESCE(updated_at, created_at)) DESC, session_id DESC`
       )
       .all() as SessionRow[];
+
+    return normalizeSessionRows(rows);
+  },
+
+  /**
+   * Sessions, archived ones included, whose last activity is before `cutoff`
+   * (an ISO timestamp), oldest first.
+   */
+  getSessionsLastActiveBefore(cutoff: string): SessionRow[] {
+    const db = getConnection();
+    const rows = db
+      .prepare(
+        `SELECT ${SESSION_ROW_COLUMNS}
+         FROM sessions
+         WHERE julianday(COALESCE(updated_at, created_at)) < julianday(?)
+         ORDER BY julianday(COALESCE(updated_at, created_at)) ASC, session_id ASC`
+      )
+      .all(cutoff) as SessionRow[];
 
     return normalizeSessionRows(rows);
   },

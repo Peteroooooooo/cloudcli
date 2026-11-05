@@ -166,5 +166,33 @@
     "archiveSessions_other": "封存 {{count}} 個工作階段",
     "archiveSessionsNotice_one": "封存會將所選工作階段移出使用中清單，但保留其歷史記錄。",
     "archiveSessionsNotice_other": "封存會將所選工作階段移出使用中清單，但保留其歷史記錄。"
+  },
+  "staleCleanup": {
+    "open": "清理舊工作階段",
+    "title": "清理舊工作階段",
+    "description": "列出 {{days}} 天以上沒有動過的工作階段，包括已封存的。加星的專案和正在執行的工作階段不會列出。",
+    "permanentNotice": "刪除會同時從 Claude Code 或 Codex 裡刪掉這個工作階段（對話記錄、附帶檔案、Codex 自己的資料庫記錄），無法復原。",
+    "idleFor": "至少多久沒動",
+    "days_one": "{{count}} 天",
+    "days_other": "{{count}} 天",
+    "loading": "正在尋找舊工作階段…",
+    "loadFailed": "清單載入失敗。",
+    "retry": "重試",
+    "empty": "沒有 {{days}} 天以上沒動過的工作階段。",
+    "allDeleted_one": "已刪除 {{count}} 個工作階段。",
+    "allDeleted_other": "已刪除 {{count}} 個工作階段。",
+    "archived": "已封存",
+    "selectedCount": "已選 {{selected}} / {{total}}",
+    "selectAll": "全選",
+    "selectNone": "全不選",
+    "delete_one": "永久刪除 {{count}} 個",
+    "delete_other": "永久刪除 {{count}} 個",
+    "confirm_one": "確定刪除 {{count}} 個",
+    "confirm_other": "確定刪除 {{count}} 個",
+    "confirmNotice": "刪除後無法復原。",
+    "deleting": "正在刪除 {{settled}} / {{total}}…",
+    "partialResult": "已刪除 {{deleted}} 個。{{failed}} 個刪除失敗，仍留在清單裡，並寫明了原因。",
+    "runningNow": "它正在執行。",
+    "close": "關閉"
   }
 }

@@ -193,7 +193,8 @@ router.post(
 
 /**
  * - `force` not set / false: archive project in DB only (`isArchived` = 1; hidden from active list).
- * - `force=true`: remove DB row, delete session rows for that path, remove all `*.jsonl` under the Claude project dir.
+ * - `force=true`: remove every session of that path from its provider (Claude files, Codex `thread/delete`),
+ *   then the session rows and the project row. Fails with 502 and keeps the project if any session could not be removed.
  */
 router.delete(
   '/:projectId',

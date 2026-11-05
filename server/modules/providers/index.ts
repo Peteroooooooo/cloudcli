@@ -10,6 +10,10 @@ export { providerModelsService } from './services/provider-models.service.js';
 // edited message's resume point, which only the providers module can read.
 export { sessionsService } from './services/sessions.service.js';
 
+// eraseSessionFromProvider: used by the projects module so a permanent project
+// delete removes each session from its provider the way a session delete does.
+export { eraseSessionFromProvider } from './services/session-deletion.service.js';
+
 // reapOrphanedOpenCodeServers: used by the server entrypoint at startup to stop
 // OpenCode turn servers a killed CloudCLI process left running.
 export { reapOrphanedOpenCodeServers } from './list/opencode/opencode-runtime.provider.js';

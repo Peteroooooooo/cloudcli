@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { broadcastSessionUpserted, chatRunRegistry } from '@/modules/websocket/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import { listBusyClaudeCliSessions } from '@/modules/providers/services/claude-cli-liveness.service.js';
+import { eraseSessionFromProvider } from '@/modules/providers/services/session-deletion.service.js';
 import { sessionHistoryCache } from '@/modules/providers/services/session-history-cache.service.js';
 import type {
   BackgroundTaskSummary,
@@ -68,6 +68,13 @@ type RecentSessionListItem = Pick<
   'sessionId' | 'provider' | 'projectId' | 'projectDisplayName' | 'sessionTitle' | 'lastActivity'
 >;
 
+type StaleSessionListItem = Pick<
+  ArchivedSessionListItem,
+  'sessionId' | 'provider' | 'projectId' | 'projectPath' | 'projectDisplayName' | 'sessionTitle' | 'lastActivity'
+> & {
+  isArchived: boolean;
+};
+
 type RecentSessionsPage = {
   conversations: RecentSessionListItem[];
   total: number;
@@ -98,22 +105,6 @@ const MAX_CLOUDCLI_SESSION_NAME_WORDS = 4;
 function buildCloudCliSessionName(initialMessage: string): string {
   const words = initialMessage.trim().split(/\s+/).filter(Boolean);
   return words.slice(0, MAX_CLOUDCLI_SESSION_NAME_WORDS).join(' ') || 'Untitled Session';
-}
-
-/**
- * Removes one file if it exists.
- */
-async function removeFileIfExists(filePath: string): Promise<boolean> {
-  try {
-    await fsp.unlink(filePath);
-    return true;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') {
-      return false;
-    }
-    throw error;
-  }
 }
 
 /**
@@ -671,7 +662,10 @@ export const sessionsService = {
    *
    * Soft-delete mirrors the project behavior by toggling `isArchived` so the
    * row disappears from active lists but remains restorable. Force-delete
-   * optionally removes the transcript file before deleting the database row.
+   * removes the session from the provider's own storage (unless
+   * `deletedFromDisk` is false) before deleting the row; when that fails the
+   * row stays, so the session is not lost from view while the provider still
+   * has it.
    */
   async deleteOrArchiveSessionById(
     sessionId: string,
@@ -697,20 +691,9 @@ export const sessionsService = {
       };
     }
 
-    let removedFromDisk = false;
-    if (options.deletedFromDisk) {
-      // Every file the conversation has lived in, not just the one the row
-      // points at now: editing a message on a provider that rewinds by
-      // branching moves the session onto a copy and leaves the earlier
-      // transcript behind. Deleting only the current one would leave the
-      // replaced turns on disk, and unreachable through the app.
-      const transcripts = [
-        ...(session.jsonl_path ? [session.jsonl_path] : []),
-        ...sessionsDb.getSupersededTranscriptPaths(sessionId),
-      ];
-      for (const transcript of transcripts) {
-        removedFromDisk = (await removeFileIfExists(transcript)) || removedFromDisk;
-      }
+    const deletedFromDisk = Boolean(options.deletedFromDisk);
+    if (deletedFromDisk) {
+      await eraseSessionFromProvider(session);
     }
 
     sessionsDb.clearSupersededProviderSessions(sessionId);
@@ -725,8 +708,52 @@ export const sessionsService = {
     return {
       sessionId,
       action: 'deleted',
-      deletedFromDisk: removedFromDisk,
+      deletedFromDisk,
     };
+  },
+
+  /**
+   * Sessions with no activity for at least `olderThanDays` days, for the
+   * "clean up old sessions" view. Archived sessions are included (they are the
+   * usual candidates); sessions in starred projects and sessions that are
+   * running now are left out.
+   */
+  async listStaleSessions(olderThanDays: number, now = Date.now()): Promise<StaleSessionListItem[]> {
+    const cutoff = new Date(now - olderThanDays * 24 * 60 * 60 * 1000).toISOString();
+    const runningSessionIds = new Set((await sessionsService.listRunningSessions()).map((entry) => entry.sessionId));
+    const projectCache = new Map<string, ReturnType<typeof projectsDb.getProjectPath>>();
+    const items: StaleSessionListItem[] = [];
+
+    for (const session of sessionsDb.getSessionsLastActiveBefore(cutoff)) {
+      if (runningSessionIds.has(session.session_id)) {
+        continue;
+      }
+
+      const projectPath = session.project_path?.trim() ? session.project_path : null;
+      let project = null;
+      if (projectPath) {
+        if (!projectCache.has(projectPath)) {
+          projectCache.set(projectPath, projectsDb.getProjectPath(projectPath));
+        }
+        project = projectCache.get(projectPath) ?? null;
+      }
+      if (project?.isStarred) {
+        continue;
+      }
+
+      items.push({
+        sessionId: session.session_id,
+        provider: session.provider as LLMProvider,
+        projectId: project?.project_id ?? null,
+        projectPath,
+        projectDisplayName: resolveProjectDisplayName(projectPath, project?.custom_project_name),
+        sessionTitle: session.custom_name?.trim() || session.session_id,
+        lastActivity: session.updated_at ?? session.created_at ?? null,
+        isArchived: Boolean(session.isArchived),
+      });
+    }
+
+    return items;
   },
 
   /**

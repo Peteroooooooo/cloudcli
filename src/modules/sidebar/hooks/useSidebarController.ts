@@ -4,7 +4,7 @@ import type { TFunction } from 'i18next';
 import { api } from '@/shared/api';
 import { subscribeToUserPreferences } from '@/shared/userSettings';
 import { usePaletteOps } from '@/modules/command-palette';
-import type { ArchivedProjectListItem, ArchivedSessionListItem, ConversationProjectResult, ConversationSearchResults, LLMProvider, Project, ProjectSession, ProjectSortOrder, RecentConversationListItem, SearchProgress, ActiveSidebarRename, PendingSidebarDeletion, ServerEvent, SessionTitleSearchResult, SessionWithProvider, SidebarSearchMode, SidebarSessionSelection } from '@/shared/types';
+import type { ArchivedProjectListItem, ArchivedSessionListItem, ConversationProjectResult, ConversationSearchResults, LLMProvider, Project, ProjectSession, ProjectSortOrder, RecentConversationListItem, SearchProgress, ActiveSidebarRename, PendingSidebarDeletion, ServerEvent, SessionDeletionFailure, SessionTitleSearchResult, SessionWithProvider, SidebarSearchMode, SidebarSessionSelection } from '@/shared/types';
 import {
   filterProjects,
   getAllSessions,
@@ -53,6 +53,26 @@ type RecentConversationsApiPayload = {
     hasMore?: boolean;
   };
 };
+
+/** Permanent deletes in flight at once; each Codex one waits for Codex's own delete. */
+const PERMANENT_DELETE_CONCURRENCY = 3;
+
+/** The reason an API error response gives, or its status when it gives none. */
+async function readApiErrorMessage(response: Response): Promise<string> {
+  try {
+    const data = (await response.json()) as { error?: string | { message?: string } };
+    const error = data.error;
+    if (typeof error === 'string' && error.trim()) {
+      return error;
+    }
+    if (error && typeof error === 'object' && typeof error.message === 'string' && error.message.trim()) {
+      return error.message;
+    }
+  } catch {
+    // Not JSON: the status is all there is.
+  }
+  return `HTTP ${response.status}`;
+}
 
 type UseSidebarControllerArgs = {
   projects: Project[];
@@ -980,12 +1000,14 @@ export function useSidebarController({
         });
         await fetchArchivedSessions();
       } else {
-        const errorText = await response.text();
+        const errorText = await readApiErrorMessage(response);
         console.error('[Sidebar] Failed to delete session:', {
           status: response.status,
           error: errorText,
         });
-        alert(t('messages.deleteSessionFailed'));
+        // The reason matters for a permanent delete: the provider may have
+        // refused it (a Codex thread something else is attached to, say).
+        alert(`${t('messages.deleteSessionFailed')}\n\n${errorText}`);
       }
     } catch (error) {
       console.error('[Sidebar] Error deleting session:', error);
@@ -1115,6 +1137,74 @@ export function useSidebarController({
       );
     }
   }, [activeSessions, backgroundSessionIds, fetchArchivedSessions, onSessionDelete, pendingDeletion, recentConversations, sessionSelection, t]);
+
+  /**
+   * Permanently deletes sessions from any projects, for the old-sessions
+   * cleanup. Resolves with the ones that could not be deleted and why; the
+   * rest are gone from the sidebar, the recents feed and the archive.
+   */
+  const deleteSessionsPermanently = useCallback(async (
+    sessionIds: string[],
+    onProgress?: (settled: number) => void,
+  ): Promise<SessionDeletionFailure[]> => {
+    const deletingIds = sessionIdsBeingDeletedRef.current;
+    const failures: SessionDeletionFailure[] = [];
+    const deletedSessionIds: string[] = [];
+    const queue = [...sessionIds];
+    let settled = 0;
+
+    const deleteOne = async (sessionId: string) => {
+      // The list was built a moment ago; a session that started a response
+      // since then is left alone, as the row actions do.
+      if (activeSessions.has(sessionId) && !backgroundSessionIds.has(sessionId)) {
+        failures.push({ sessionId, message: t('staleCleanup.runningNow', 'It is running now.') });
+        return;
+      }
+      if (deletingIds.has(sessionId)) {
+        return;
+      }
+      deletingIds.add(sessionId);
+      try {
+        const response = await api.deleteSession(sessionId, true);
+        if (response.ok) {
+          deletedSessionIds.push(sessionId);
+        } else {
+          failures.push({ sessionId, message: await readApiErrorMessage(response) });
+        }
+      } catch (error) {
+        failures.push({ sessionId, message: error instanceof Error ? error.message : String(error) });
+      } finally {
+        deletingIds.delete(sessionId);
+      }
+    };
+
+    // A few at a time: the server works through Codex deletes one by one, and
+    // a burst of hundreds of requests would only queue up behind them.
+    await Promise.all(
+      Array.from({ length: Math.min(PERMANENT_DELETE_CONCURRENCY, queue.length) }, async () => {
+        for (let sessionId = queue.shift(); sessionId; sessionId = queue.shift()) {
+          await deleteOne(sessionId);
+          settled += 1;
+          onProgress?.(settled);
+        }
+      }),
+    );
+
+    if (deletedSessionIds.length > 0) {
+      const deletedIdSet = new Set(deletedSessionIds);
+      deletedSessionIds.forEach((sessionId) => onSessionDelete?.(sessionId));
+      const removed = recentConversations.filter((conversation) => deletedIdSet.has(conversation.sessionId)).length;
+      setRecentConversations((previous) =>
+        previous.filter((conversation) => !deletedIdSet.has(conversation.sessionId)),
+      );
+      if (removed > 0) {
+        setRecentConversationsTotal((total) => Math.max(0, total - removed));
+      }
+      await fetchArchivedSessions();
+    }
+
+    return failures;
+  }, [activeSessions, backgroundSessionIds, fetchArchivedSessions, onSessionDelete, recentConversations, t]);
 
   const requestProjectDelete = useCallback(
     (project: Project) => {
@@ -1385,6 +1475,7 @@ export function useSidebarController({
     cancelSessionSelection,
     showDeleteSelectedSessionsConfirmation,
     confirmDeleteSessions,
+    deleteSessionsPermanently,
     requestProjectDelete,
     confirmDeleteProject,
     handleProjectSelect,

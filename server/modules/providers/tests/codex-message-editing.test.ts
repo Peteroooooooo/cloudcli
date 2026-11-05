@@ -297,11 +297,23 @@ test('deleting an edited session removes every transcript it lived in', { concur
       codexAppServer.forkThread = realForkThread;
     }
 
-    await sessionsService.deleteOrArchiveSessionById(sessionId, { force: true, deletedFromDisk: true });
+    // A real app-server would act on the real ~/.codex, not this test's home.
+    const realDeleteThread = codexAppServer.deleteThread;
+    const deletedThreads: string[] = [];
+    codexAppServer.deleteThread = async (threadId) => {
+      deletedThreads.push(threadId);
+      return 'absent';
+    };
+    try {
+      await sessionsService.deleteOrArchiveSessionById(sessionId, { force: true, deletedFromDisk: true });
+    } finally {
+      codexAppServer.deleteThread = realDeleteThread;
+    }
 
     // The row only ever points at the newest transcript, so deleting from that
     // alone would leave the replaced turns on disk — and unreachable, because
     // the indexer refuses a superseded thread.
+    assert.deepEqual(deletedThreads.sort(), ['thread-1', 'thread-2']);
     assert.equal(existsSync(forkPath), false);
     assert.equal(existsSync(preEditPath), false);
     assert.equal(sessionsDb.isProviderSessionSuperseded('thread-1', 'codex'), false);

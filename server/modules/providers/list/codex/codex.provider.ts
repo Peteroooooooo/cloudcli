@@ -5,6 +5,7 @@ import { CodexProviderModels } from '@/modules/providers/list/codex/codex-models
 import { codexRuntime } from '@/modules/providers/list/codex/codex-runtime.provider.js';
 import { CodexMcpProvider } from '@/modules/providers/list/codex/codex-mcp.provider.js';
 import { CodexSessionSynchronizer } from '@/modules/providers/list/codex/codex-session-synchronizer.provider.js';
+import { CodexSessionDeletionProvider } from '@/modules/providers/list/codex/codex-session-deletion.provider.js';
 import { CodexSessionTitleProvider } from '@/modules/providers/list/codex/codex-session-title.provider.js';
 import { CodexSessionsProvider } from '@/modules/providers/list/codex/codex-sessions.provider.js';
 import { CodexSkillsProvider } from '@/modules/providers/list/codex/codex-skills.provider.js';
@@ -13,6 +14,7 @@ import type {
   IProviderFork,
   IProviderModels,
   IProviderRuntime,
+  IProviderSessionDeletion,
   IProviderSessionSynchronizer,
   IProviderSessionTitle,
   IProviderSkills,
@@ -28,6 +30,7 @@ export class CodexProvider extends AbstractProvider {
   readonly sessions: IProviderSessions = new CodexSessionsProvider();
   readonly fork: IProviderFork = new CodexForkProvider();
   readonly sessionTitle: IProviderSessionTitle = new CodexSessionTitleProvider();
+  readonly sessionDeletion: IProviderSessionDeletion = new CodexSessionDeletionProvider();
   readonly sessionSynchronizer: IProviderSessionSynchronizer = new CodexSessionSynchronizer();
 
   constructor() {

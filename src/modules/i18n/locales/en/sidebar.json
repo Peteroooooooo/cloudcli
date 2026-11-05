@@ -176,5 +176,33 @@
     "archiveSessions_other": "Archive {{count}} sessions",
     "archiveSessionsNotice_one": "Archive keeps the session out of the active list while preserving its history.",
     "archiveSessionsNotice_other": "Archive keeps the sessions out of the active list while preserving their history."
+  },
+  "staleCleanup": {
+    "open": "Clean up old sessions",
+    "title": "Clean up old sessions",
+    "description": "Sessions idle for {{days}} days or more, archived ones included. Starred projects and running sessions are not listed.",
+    "permanentNotice": "Deleting also removes the session from Claude Code or Codex (transcript, side files, Codex's own records). It cannot be undone.",
+    "idleFor": "Idle for at least",
+    "days_one": "{{count}} day",
+    "days_other": "{{count}} days",
+    "loading": "Finding old sessions…",
+    "loadFailed": "The list could not be loaded.",
+    "retry": "Retry",
+    "empty": "No sessions have been idle for {{days}} days or more.",
+    "allDeleted_one": "Deleted {{count}} session.",
+    "allDeleted_other": "Deleted {{count}} sessions.",
+    "archived": "Archived",
+    "selectedCount": "{{selected}} of {{total}} selected",
+    "selectAll": "Select all",
+    "selectNone": "Select none",
+    "delete_one": "Delete {{count}} permanently",
+    "delete_other": "Delete {{count}} permanently",
+    "confirm_one": "Yes, delete {{count}}",
+    "confirm_other": "Yes, delete {{count}}",
+    "confirmNotice": "This cannot be undone.",
+    "deleting": "Deleting {{settled}} of {{total}}…",
+    "partialResult": "Deleted {{deleted}}. {{failed}} could not be deleted; they are still listed with the reason.",
+    "runningNow": "It is running now.",
+    "close": "Close"
   }
 }

@@ -921,6 +921,15 @@ router.get(
 );
 
 router.get(
+  '/sessions/stale',
+  asyncHandler(async (req: Request, res: Response) => {
+    const olderThanDays = parseBoundedIntegerQuery(req.query.olderThanDays, 'olderThanDays', 7, 1, 3650);
+    const sessions = await sessionsService.listStaleSessions(olderThanDays);
+    res.json(createApiSuccessResponse({ olderThanDays, sessions }));
+  }),
+);
+
+router.get(
   '/sessions/:sessionId/provider-id',
   asyncHandler(async (req: Request, res: Response) => {
     const sessionId = parseSessionId(req.params.sessionId);

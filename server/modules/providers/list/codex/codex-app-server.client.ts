@@ -268,4 +268,102 @@ export const codexAppServer = {
       await call('thread/name/set', { threadId: input.threadId, name: input.name });
     });
   },
+
+  /**
+   * Deletes a thread the way `codex delete` does: the rollout file, its rows in
+   * Codex's thread and history databases, its line in the name index, and the
+   * sub-agent threads it spawned. Codex keeps paginated threads in its
+   * databases even after the rollout file is gone, so removing only the file
+   * leaves the thread in Codex's list.
+   *
+   * Resolves `'absent'` when Codex has no such thread (already deleted, or an
+   * id Codex never issued), so a retried delete does not fail on the part that
+   * already went.
+   */
+  deleteThread(threadId: string): Promise<CodexThreadDeleteOutcome> {
+    return new Promise((resolve, reject) => {
+      deleteQueue.push({ threadId, resolve, reject });
+      if (!isDeleteWorkerRunning) {
+        void drainDeleteQueue();
+      }
+    });
+  },
 };
+
+export type CodexThreadDeleteOutcome = 'deleted' | 'absent';
+
+type QueuedThreadDelete = {
+  threadId: string;
+  resolve: (outcome: CodexThreadDeleteOutcome) => void;
+  reject: (error: unknown) => void;
+};
+
+/**
+ * Deletes wait here and share one app-server.
+ *
+ * A bulk delete sends one request per session. Spawning a server for each
+ * would cost about a second apiece and have several processes writing Codex's
+ * SQLite files at once; one server working through the queue in order avoids
+ * both.
+ */
+const deleteQueue: QueuedThreadDelete[] = [];
+let isDeleteWorkerRunning = false;
+
+/** JSON-RPC "invalid request": what Codex answers for an id it has no thread for. */
+const RPC_INVALID_REQUEST = -32600;
+
+function isInvalidRequest(error: unknown): boolean {
+  return error instanceof AppError
+    && (error.details as { rpcCode?: number } | undefined)?.rpcCode === RPC_INVALID_REQUEST;
+}
+
+async function deleteOneThread(
+  call: (method: string, params: unknown) => Promise<unknown>,
+  threadId: string,
+): Promise<CodexThreadDeleteOutcome> {
+  try {
+    await call('thread/delete', { threadId });
+    return 'deleted';
+  } catch (deleteError) {
+    // "Invalid request" covers both a thread that is not there and one Codex
+    // refuses to delete (another thread is attached to it). Only a thread that
+    // cannot be read either is gone.
+    if (!isInvalidRequest(deleteError)) {
+      throw deleteError;
+    }
+    try {
+      await call('thread/read', { threadId, includeTurns: false });
+    } catch (readError) {
+      if (isInvalidRequest(readError)) {
+        return 'absent';
+      }
+    }
+    throw deleteError;
+  }
+}
+
+async function drainDeleteQueue(): Promise<void> {
+  isDeleteWorkerRunning = true;
+  try {
+    while (deleteQueue.length > 0) {
+      try {
+        await withAppServer(async (call) => {
+          for (let next = deleteQueue.shift(); next; next = deleteQueue.shift()) {
+            try {
+              next.resolve(await deleteOneThread(call, next.threadId));
+            } catch (error) {
+              next.reject(error);
+            }
+          }
+        });
+      } catch (error) {
+        // The server did not start, so nothing queued can be deleted now.
+        for (const queued of deleteQueue.splice(0)) {
+          queued.reject(error);
+        }
+      }
+    }
+  } finally {
+    isDeleteWorkerRunning = false;
+  }
+}

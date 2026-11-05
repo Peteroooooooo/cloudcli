@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useDeviceSettings } from '@/shared/hooks/useDeviceSettings';
@@ -13,6 +13,7 @@ import type { LLMProvider, LoadingProgress, MCPServerStatus, Project, ProjectSes
 import SidebarCollapsed from '@/modules/sidebar/SidebarCollapsed';
 import SidebarContent from '@/modules/sidebar/SidebarContent';
 import SidebarModals from '@/modules/sidebar/SidebarModals';
+import StaleSessionsCleanup from '@/modules/sidebar/StaleSessionsCleanup';
 
 type SidebarProps = {
   projects: Project[];
@@ -80,6 +81,7 @@ function Sidebar({
   const activeSessions = useBusySessionIdSet();
   const backgroundSessionIds = useBackgroundSessionIdSet();
   const { subscribe } = useWebSocket();
+  const [showStaleCleanup, setShowStaleCleanup] = useState(false);
 
   const {
     isSidebarCollapsed,
@@ -133,6 +135,7 @@ function Sidebar({
     cancelSessionSelection,
     showDeleteSelectedSessionsConfirmation,
     confirmDeleteSessions,
+    deleteSessionsPermanently,
     requestProjectDelete,
     confirmDeleteProject,
     handleProjectSelect,
@@ -264,6 +267,15 @@ function Sidebar({
         t={t}
       />
 
+      {showStaleCleanup && (
+        <StaleSessionsCleanup
+          onClose={() => setShowStaleCleanup(false)}
+          onDeleteSessions={deleteSessionsPermanently}
+          currentTime={currentTime}
+          t={t}
+        />
+      )}
+
       {isSidebarCollapsed ? (
         <SidebarCollapsed
           onExpand={handleExpandSidebar}
@@ -314,6 +326,7 @@ function Sidebar({
                 { isArchived: true },
               );
             }}
+            onOpenStaleSessionsCleanup={() => setShowStaleCleanup(true)}
             onConversationResultClick={(projectId: string | null, sessionId: string, provider: string, messageTimestamp?: string | null, messageSnippet?: string | null) => {
               // `projectId` (DB key) is the canonical identifier post-migration.
               // The server emits null when it can't resolve a project row for

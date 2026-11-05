@@ -1,71 +1,40 @@
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
-
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
+import { eraseSessionFromProvider } from '@/modules/providers/index.js';
 import { AppError } from '@/shared/utils.js';
 
-function uniqueJsonlPathsFromSessions(
-  sessions: Array<{ jsonl_path: string | null }>,
-): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-
-  for (const row of sessions) {
-    const raw = row.jsonl_path?.trim();
-    if (!raw) {
-      continue;
-    }
-    const absolute = path.isAbsolute(raw) ? path.normalize(raw) : path.resolve(raw);
-    if (seen.has(absolute)) {
-      continue;
-    }
-    seen.add(absolute);
-    result.push(absolute);
-  }
-
-  return result;
-}
-
-async function unlinkJsonlIfExists(filePath: string): Promise<void> {
-  try {
-    await fs.unlink(filePath);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') {
-      return;
-    }
-    console.warn(`[project-delete] Failed to remove ${filePath}:`, (error as Error).message);
-  }
-}
-
 /**
- * Loads all session rows for the project path and removes each distinct `jsonl_path` file on disk.
+ * Removes every session of a project from its provider's storage (transcripts,
+ * the provider's side folders and databases) and deletes the rows of the ones
+ * that went. A session that could not be removed keeps its row and is
+ * returned, so the project can be deleted again to retry it.
  */
-export async function deleteSessionJsonlFilesForProjectPath(projectPath: string): Promise<void> {
-  const sessions = sessionsDb.getSessionsByProjectPathIncludingArchived(projectPath);
-  // Including the transcripts a session has left behind: editing a message on
-  // a provider that rewinds by branching moves the session onto a copy, and
-  // the row stops pointing at the file the replaced turns are still in.
-  const paths = uniqueJsonlPathsFromSessions([
-    ...sessions,
-    ...sessions.flatMap((session) => sessionsDb
-      .getSupersededTranscriptPaths(session.session_id)
-      .map((jsonl_path) => ({ jsonl_path }))),
-  ]);
+export async function deleteProjectSessionsFromProviders(
+  projectPath: string,
+): Promise<Array<{ sessionId: string; message: string }>> {
+  const failed: Array<{ sessionId: string; message: string }> = [];
 
-  for (const filePath of paths) {
-    await unlinkJsonlIfExists(filePath);
-  }
-
-  for (const session of sessions) {
+  for (const session of sessionsDb.getSessionsByProjectPathIncludingArchived(projectPath)) {
+    try {
+      await eraseSessionFromProvider(session);
+    } catch (error) {
+      failed.push({
+        sessionId: session.session_id,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      continue;
+    }
     sessionsDb.clearSupersededProviderSessions(session.session_id);
+    sessionsDb.deleteSessionById(session.session_id);
   }
+
+  return failed;
 }
 
 /**
  * - **Soft delete** (`force` false): set `isArchived` on the `projects` row (hide from the active list; DB only).
- * - **Force** (`force` true): for each session row for that `project_path`, delete the file at `jsonl_path`
- *   (when set), then remove session rows and the `projects` row.
+ * - **Force** (`force` true): remove each session of that `project_path` from its provider and delete its row,
+ *   then delete the `projects` row. If any session could not be removed, the project and that session's row
+ *   are kept and the call fails.
  */
 export async function deleteOrArchiveProject(projectId: string, force: boolean): Promise<void> {
   const row = projectsDb.getProjectById(projectId);
@@ -81,7 +50,18 @@ export async function deleteOrArchiveProject(projectId: string, force: boolean):
     return;
   }
 
-  await deleteSessionJsonlFilesForProjectPath(row.project_path);
+  const failed = await deleteProjectSessionsFromProviders(row.project_path);
+  if (failed.length > 0) {
+    throw new AppError(
+      `${failed.length} session(s) of this project could not be deleted, so the project was kept: ${failed[0].message}`,
+      {
+        code: 'PROJECT_DELETE_INCOMPLETE',
+        statusCode: 502,
+        details: { failed },
+      },
+    );
+  }
+
   sessionsDb.deleteSessionsByProjectPath(row.project_path);
   projectsDb.deleteProjectById(projectId);
 }
