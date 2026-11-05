@@ -186,6 +186,25 @@ export const projectsDb = {
         `).run(normalizedProjectPath);
     },
 
+    /**
+     * Deletes a project row once no session row refers to it, and returns its
+     * id. Starred and archived projects are kept even when empty: the star and
+     * the archive are the user's choices, not something the transcripts decide.
+     */
+    deleteProjectPathIfUnused(projectPath: string): string | null {
+        const db = getConnection();
+        const row = db.prepare(`
+            DELETE FROM projects
+            WHERE project_path = ?
+              AND isStarred = 0
+              AND isArchived = 0
+              AND NOT EXISTS (SELECT 1 FROM sessions WHERE sessions.project_path = projects.project_path)
+            RETURNING project_id
+        `).get(normalizeProjectPath(projectPath)) as Pick<ProjectRepositoryRow, 'project_id'> | undefined;
+
+        return row?.project_id ?? null;
+    },
+
     deleteProjectById(projectId: string): void {
         const db = getConnection();
         db.prepare(`

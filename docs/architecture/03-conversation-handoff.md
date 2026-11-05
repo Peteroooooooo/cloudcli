@@ -63,7 +63,7 @@ rendered messages is [the realtime stream](./02-realtime-stream.md).
 | `server/modules/websocket/services/chat-websocket.service.ts` | `handleChatSend`, `handleChatEditSend`, `handleChatSubscribe`, `handleChatAbort`, `dispatchRun`, `runDetachedChatTurn` |
 | `server/modules/websocket/services/session-upsert-broadcast.service.ts` | `buildSessionUpsertedEvent` — the single builder of the sidebar delta |
 | `server/modules/providers/services/sessions-watcher.service.ts` | Watches provider directories, debounces, broadcasts upserts in batches |
-| `server/modules/providers/services/session-synchronizer.service.ts` | Shared full scan, per-file indexing, `pruneOrphanedSessions` |
+| `server/modules/providers/services/session-synchronizer.service.ts` | Shared full scan, per-file indexing, `pruneDeletedSessions` |
 | `server/modules/providers/list/claude/claude-sessions.provider.ts` | `resolveEditAnchor` — walks `parentUuid` back to the previous assistant row |
 | `server/modules/providers/list/codex/codex-sessions.provider.ts` | `resolveEditAnchor` and `rewindSession` — forks the thread and repoints the session row |
 | `server/modules/providers/list/claude/claude-fork.provider.ts`, `.../codex/codex-fork.provider.ts` | Branch a conversation into an independent one |
@@ -434,9 +434,13 @@ How rows are claimed:
 
 `session-synchronizer.service.ts` adds two guarantees beyond indexing. Concurrent callers
 share one scan (opening the UI fires `/api/projects` and `/api/projects/archived` at once),
-and `pruneOrphanedSessions` deletes rows whose transcript is gone — but only when the
-containing directory still exists, so an unmounted home cannot wipe the index, and only when
-no provider sync failed in that pass.
+and `pruneDeletedSessions` deletes rows whose transcript is gone, then any project left with
+no session row unless it is starred or archived. A row is only dropped while the provider's
+transcript root (`~/.claude/projects`, `~/.codex`, `~/.cursor/projects`) still exists, or,
+for a path outside every root, its containing directory, so an unmounted home cannot wipe
+the index; and only for providers whose sync succeeded in that pass. The sessions watcher
+runs the same pass about 1.5 s after a transcript or folder is deleted, and every pass that
+removes something broadcasts `sessions_removed` so open sidebars drop the rows at once.
 
 The sidebar's `session_upserted` reducer in `useProjectsState.ts` then does five things:
 

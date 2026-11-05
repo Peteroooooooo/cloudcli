@@ -3,7 +3,7 @@ import path from 'node:path';
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { generateDisplayName } from '@/modules/projects/index.js';
 import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
-import type { SessionUpsertedEvent } from '@/shared/types.js';
+import type { SessionsRemovedEvent, SessionUpsertedEvent } from '@/shared/types.js';
 
 /**
  * The single producer of the `session_upserted` delta.
@@ -102,6 +102,21 @@ export async function broadcastSessionUpsertedBatch(
   }
 
   sendToConnectedClients(payloads);
+}
+
+/** Announces sessions whose transcripts were deleted outside the app, and the projects removed with them. */
+export function broadcastSessionsRemoved(sessionIds: string[], projectIds: string[]): void {
+  if (sessionIds.length === 0 && projectIds.length === 0) {
+    return;
+  }
+
+  const event: SessionsRemovedEvent = {
+    kind: 'sessions_removed',
+    sessionIds,
+    projectIds,
+    timestamp: new Date().toISOString(),
+  };
+  sendToConnectedClients([JSON.stringify(event)]);
 }
 
 /** @internal Exported for the broadcast tests, which assert the payload shape directly. */

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
+import { closeConnection, initializeDatabase, projectsDb, sessionsDb } from '@/modules/database/index.js';
 
 // Each provider synchronizer resolves `os.homedir()` when the registry module is
 // first imported, so HOME has to point at an empty fixture home *before* that
@@ -18,6 +18,7 @@ process.env.USERPROFILE = fixtureHome;
 const { sessionSynchronizerService } = await import(
   '@/modules/providers/services/session-synchronizer.service.js'
 );
+const { connectedClients } = await import('@/modules/websocket/index.js');
 
 process.on('exit', () => {
   if (previousHome === undefined) {
@@ -103,5 +104,95 @@ test('synchronizeSessions keeps sessions that have no transcript path yet', asyn
     assert.equal(result.prunedOrphans, 0);
     assert.ok(sessionsDb.getSessionById('pending-app-session'));
     assert.ok(sessionsDb.getSessionById('opencode-session'));
+  });
+});
+
+const claudeProjectsRoot = path.join(fixtureHome, '.claude', 'projects');
+
+async function withClaudeRoot(runTest: () => Promise<void>): Promise<void> {
+  await mkdir(claudeProjectsRoot, { recursive: true });
+  try {
+    await runTest();
+  } finally {
+    await rm(path.join(fixtureHome, '.claude'), { recursive: true, force: true });
+  }
+}
+
+test('a session whose whole project folder was deleted is dropped, and so is its emptied project', async () => {
+  await withIsolatedDatabase(async () => {
+    await withClaudeRoot(async () => {
+      const deletedFolderTranscript = path.join(claudeProjectsRoot, '-tmp-deleted-project', 'gone.jsonl');
+      sessionsDb.createSession('gone-session', 'claude', '/tmp/deleted-project', 'Gone', undefined, undefined, deletedFolderTranscript);
+      const projectId = projectsDb.getProjectPath('/tmp/deleted-project')?.project_id;
+
+      const result = await sessionSynchronizerService.synchronizeSessions();
+
+      assert.deepEqual(result.removedSessionIds, ['gone-session']);
+      assert.deepEqual(result.removedProjectIds, [projectId]);
+      assert.equal(sessionsDb.getSessionById('gone-session'), null);
+      assert.equal(projectsDb.getProjectPath('/tmp/deleted-project'), null);
+    });
+  });
+});
+
+test('a starred project, or one that still has a session, stays when a session is dropped', async () => {
+  await withIsolatedDatabase(async () => {
+    await withClaudeRoot(async () => {
+      const liveDirectory = path.join(claudeProjectsRoot, '-tmp-busy-project');
+      await mkdir(liveDirectory, { recursive: true });
+      const livePath = path.join(liveDirectory, 'live.jsonl');
+      await writeFile(livePath, '{}\n');
+
+      sessionsDb.createSession('starred-gone', 'claude', '/tmp/starred-project', 'Gone', undefined, undefined, path.join(claudeProjectsRoot, '-tmp-starred-project', 'gone.jsonl'));
+      projectsDb.updateProjectIsStarred('/tmp/starred-project', true);
+      sessionsDb.createSession('busy-gone', 'claude', '/tmp/busy-project', 'Gone', undefined, undefined, path.join(liveDirectory, 'gone.jsonl'));
+      sessionsDb.createSession('busy-live', 'claude', '/tmp/busy-project', 'Live', undefined, undefined, livePath);
+
+      const result = await sessionSynchronizerService.pruneDeletedSessions();
+
+      assert.deepEqual(result.removedSessionIds.sort(), ['busy-gone', 'starred-gone']);
+      assert.deepEqual(result.removedProjectIds, []);
+      assert.ok(projectsDb.getProjectPath('/tmp/starred-project'));
+      assert.ok(projectsDb.getProjectPath('/tmp/busy-project'));
+      assert.ok(sessionsDb.getSessionById('busy-live'));
+    });
+  });
+});
+
+test('nothing is dropped while the provider transcript root itself is missing', async () => {
+  await withIsolatedDatabase(async () => {
+    // No ~/.codex in the fixture home: an unmounted or never-created home.
+    const codexTranscript = path.join(fixtureHome, '.codex', 'sessions', '2026', '01', '01', 'rollout-x.jsonl');
+    sessionsDb.createSession('codex-unmounted', 'codex', PROJECT_PATH, 'Codex', undefined, undefined, codexTranscript);
+
+    const result = await sessionSynchronizerService.pruneDeletedSessions();
+
+    assert.deepEqual(result.removedSessionIds, []);
+    assert.ok(sessionsDb.getSessionById('codex-unmounted'));
+  });
+});
+
+test('every open client is told which sessions and projects were removed', async () => {
+  await withIsolatedDatabase(async () => {
+    await withClaudeRoot(async () => {
+      sessionsDb.createSession('told-gone', 'claude', '/tmp/told-project', 'Gone', undefined, undefined, path.join(claudeProjectsRoot, '-tmp-told-project', 'gone.jsonl'));
+      const projectId = projectsDb.getProjectPath('/tmp/told-project')?.project_id;
+      const frames: Array<Record<string, unknown>> = [];
+      const connection = { readyState: 1, send: (data: string) => frames.push(JSON.parse(data) as Record<string, unknown>) };
+      connectedClients.add(connection as never);
+
+      try {
+        await sessionSynchronizerService.pruneDeletedSessions();
+        // A pass that removes nothing stays silent.
+        await sessionSynchronizerService.pruneDeletedSessions();
+      } finally {
+        connectedClients.delete(connection as never);
+      }
+
+      assert.equal(frames.length, 1);
+      assert.equal(frames[0].kind, 'sessions_removed');
+      assert.deepEqual(frames[0].sessionIds, ['told-gone']);
+      assert.deepEqual(frames[0].projectIds, [projectId]);
+    });
   });
 });

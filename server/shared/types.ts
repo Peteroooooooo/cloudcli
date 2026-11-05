@@ -242,6 +242,7 @@ export type MessageKind =
 export type GatewayEventKind =
   | 'chat_subscribed'
   | 'session_upserted'
+  | 'sessions_removed'
   | 'loading_progress'
   | 'protocol_error'
   | 'scheduled_messages_changed';
@@ -288,6 +289,18 @@ export type SessionUpsertedEvent = {
     lastActivity: string;
   };
   project: SessionUpsertedProject | null;
+  timestamp: string;
+};
+
+/**
+ * The `sessions_removed` sidebar delta: sessions whose transcript was deleted
+ * outside the app, and the projects that were left with no session because of
+ * it. Ids are app-facing session and project ids.
+ */
+export type SessionsRemovedEvent = {
+  kind: 'sessions_removed';
+  sessionIds: string[];
+  projectIds: string[];
   timestamp: string;
 };
 

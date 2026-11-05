@@ -750,6 +750,50 @@ export function useProjectsState({
         return;
       }
 
+      // Transcripts deleted outside the app (the CLI, another tool, by hand).
+      if (event.kind === 'sessions_removed') {
+        const readIds = (value: unknown): string[] => (
+          Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string' && id.length > 0) : []
+        );
+        const removedSessionIds = readIds(event.sessionIds);
+        const removedProjectIds = new Set(readIds(event.projectIds));
+        if (removedSessionIds.length === 0 && removedProjectIds.size === 0) {
+          return;
+        }
+
+        for (const removedSessionId of removedSessionIds) {
+          clearSessionAttention(removedSessionId);
+        }
+
+        setProjects((previousProjects) => {
+          let changed = false;
+          const nextProjects: Project[] = [];
+          for (const project of previousProjects) {
+            if (removedProjectIds.has(project.projectId)) {
+              changed = true;
+              continue;
+            }
+            const updatedProject = removedSessionIds.reduce(removeSessionFromProject, project);
+            if (updatedProject !== project) {
+              changed = true;
+            }
+            nextProjects.push(updatedProject);
+          }
+          return changed ? nextProjects : previousProjects;
+        });
+
+        const viewedSession = selectedSessionRef.current;
+        if (viewedSession && removedSessionIds.includes(viewedSession.id)) {
+          setSelectedSession(null);
+          navigate('/');
+        }
+        const viewedProject = selectedProjectRef.current;
+        if (viewedProject && removedProjectIds.has(viewedProject.projectId)) {
+          setSelectedProject(null);
+        }
+        return;
+      }
+
       const eventSessionId = typeof event.sessionId === 'string' && event.sessionId
         ? event.sessionId
         : null;
@@ -876,7 +920,7 @@ export function useProjectsState({
     };
 
     return subscribe(handleEvent);
-  }, [isSessionProcessing, markSessionAttention, navigate, refreshProjectsSilently, sessionId, subscribe]);
+  }, [clearSessionAttention, isSessionProcessing, markSessionAttention, navigate, refreshProjectsSilently, sessionId, subscribe]);
 
   useEffect(() => {
     return () => {

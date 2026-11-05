@@ -1,11 +1,20 @@
+import os from 'node:os';
 import path from 'node:path';
 import { access } from 'node:fs/promises';
 
-import { scanStateDb, sessionsDb } from '@/modules/database/index.js';
+import { projectsDb, scanStateDb, sessionsDb } from '@/modules/database/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
+import { broadcastSessionsRemoved } from '@/modules/websocket/index.js';
 import type { LLMProvider } from '@/shared/types.js';
 
-type SessionSynchronizeResult = {
+type PruneResult = {
+  /** App-facing ids of the session rows that were dropped. */
+  removedSessionIds: string[];
+  /** Projects dropped because their last session row went with them. */
+  removedProjectIds: string[];
+};
+
+type SessionSynchronizeResult = PruneResult & {
   processedByProvider: Record<LLMProvider, number>;
   /** Indexed sessions dropped because their transcript file no longer exists. */
   prunedOrphans: number;
@@ -22,43 +31,102 @@ const pathExists = async (target: string): Promise<boolean> => {
 };
 
 /**
- * Removes indexed sessions whose transcript file has disappeared from disk.
- *
- * Nothing else deletes these rows: the synchronizers only ever upsert, and the
- * watcher reacts to `add`/`change` but not `unlink`. A transcript removed by
- * hand — or written by a test run that pointed at the real `~/.claude` — left a
- * permanent sidebar entry that opened an empty "Untitled" session.
- *
- * A row is only dropped when its *containing directory* still exists. That
- * keeps an unmounted or not-yet-created home from being read as "every
- * transcript was deleted" and wiping the whole index.
+ * The directory each provider keeps its transcripts under. Resolved per call
+ * because tests point the home directory at a fixture after import.
  */
-const pruneOrphanedSessions = async (): Promise<number> => {
+const getProviderTranscriptRoot = (provider: string): string | null => {
+  const home = os.homedir();
+  switch (provider) {
+    case 'claude':
+      return path.join(home, '.claude', 'projects');
+    case 'codex':
+      // Covers both `sessions/` and `archived_sessions/`.
+      return path.join(home, '.codex');
+    case 'cursor':
+      return path.join(home, '.cursor', 'projects');
+    default:
+      return null;
+  }
+};
+
+/** Codex app-server reports paths with the Windows `\\?\` prefix; `path.relative` does not strip it. */
+const stripWindowsLongPathPrefix = (target: string): string => target.replace(/^\\\\\?\\/, '');
+
+const isInsideDirectory = (directory: string, target: string): boolean => {
+  const relativePath = path.relative(directory, target);
+  return Boolean(relativePath)
+    && relativePath !== '..'
+    && !relativePath.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relativePath);
+};
+
+/**
+ * Removes indexed sessions whose transcript file has disappeared from disk,
+ * then the projects that were left without any session.
+ *
+ * Nothing else deletes these rows: the synchronizers only ever upsert. A row
+ * is dropped when its file is gone and the provider's transcript root still
+ * exists, so deleting a whole project folder clears its sessions too. For a
+ * transcript outside every known root, its containing directory has to exist
+ * instead. Either way an unmounted or not-yet-created home is never read as
+ * "every transcript was deleted" and cannot wipe the index.
+ *
+ * `providers` limits the pass to providers whose scan just succeeded: one that
+ * failed may not have re-indexed transcripts it would otherwise have re-created.
+ */
+const pruneDeletedSessions = async (providers?: ReadonlySet<string>): Promise<PruneResult> => {
   const knownDirectoryExists = new Map<string, boolean>();
-  let pruned = 0;
+  const directoryExists = async (directory: string): Promise<boolean> => {
+    let exists = knownDirectoryExists.get(directory);
+    if (exists === undefined) {
+      exists = await pathExists(directory);
+      knownDirectoryExists.set(directory, exists);
+    }
+    return exists;
+  };
 
-  for (const { session_id: sessionId, jsonl_path: jsonlPath } of sessionsDb.getSessionsWithTranscriptPath()) {
-    if (await pathExists(jsonlPath)) {
+  const removedSessionIds: string[] = [];
+  const emptiedProjectPaths = new Set<string>();
+
+  for (const row of sessionsDb.getSessionsWithTranscriptPath()) {
+    if (providers && !providers.has(row.provider)) {
+      continue;
+    }
+    if (await pathExists(row.jsonl_path)) {
       continue;
     }
 
-    const directory = path.dirname(jsonlPath);
-    let directoryExists = knownDirectoryExists.get(directory);
-    if (directoryExists === undefined) {
-      directoryExists = await pathExists(directory);
-      knownDirectoryExists.set(directory, directoryExists);
-    }
-
-    if (!directoryExists) {
+    const transcriptPath = stripWindowsLongPathPrefix(row.jsonl_path);
+    const providerRoot = getProviderTranscriptRoot(row.provider);
+    const guardDirectory = providerRoot && isInsideDirectory(providerRoot, transcriptPath)
+      ? providerRoot
+      : path.dirname(transcriptPath);
+    if (!(await directoryExists(guardDirectory))) {
       continue;
     }
 
-    if (sessionsDb.deleteSessionById(sessionId)) {
-      pruned += 1;
+    if (sessionsDb.deleteSessionById(row.session_id)) {
+      removedSessionIds.push(row.session_id);
+      if (row.project_path) {
+        emptiedProjectPaths.add(row.project_path);
+      }
     }
   }
 
-  return pruned;
+  const removedProjectIds: string[] = [];
+  for (const projectPath of emptiedProjectPaths) {
+    const projectId = projectsDb.deleteProjectPathIfUnused(projectPath);
+    if (projectId) {
+      removedProjectIds.push(projectId);
+    }
+  }
+
+  // Every open client learns about the removal, not only the one whose request
+  // happened to find it: a client keeps sessions from pages it already loaded
+  // when it merges a refreshed list.
+  broadcastSessionsRemoved(removedSessionIds, removedProjectIds);
+
+  return { removedSessionIds, removedProjectIds };
 };
 
 /**
@@ -86,6 +154,7 @@ async function runSessionSynchronization(): Promise<SessionSynchronizeResult> {
     opencode: 0,
   };
   const failures: string[] = [];
+  const succeededProviders = new Set<string>();
 
   const results = await Promise.allSettled(
     providerRegistry.listProviders().map(async (provider) => ({
@@ -97,6 +166,7 @@ async function runSessionSynchronization(): Promise<SessionSynchronizeResult> {
   for (const result of results) {
     if (result.status === 'fulfilled') {
       processedByProvider[result.value.provider] = result.value.processed;
+      succeededProviders.add(result.value.provider);
       continue;
     }
 
@@ -104,9 +174,7 @@ async function runSessionSynchronization(): Promise<SessionSynchronizeResult> {
     failures.push(reason);
   }
 
-  // Pruning is skipped after a partial sync: a provider that just failed may
-  // not have re-indexed transcripts it would otherwise have re-created.
-  const prunedOrphans = failures.length === 0 ? await pruneOrphanedSessions() : 0;
+  const pruned = await pruneDeletedSessions(succeededProviders);
 
   if (failures.length === 0) {
     scanStateDb.updateLastScannedAt(scanBoundary);
@@ -118,7 +186,8 @@ async function runSessionSynchronization(): Promise<SessionSynchronizeResult> {
 
   return {
     processedByProvider,
-    prunedOrphans,
+    prunedOrphans: pruned.removedSessionIds.length,
+    ...pruned,
     failures,
   };
 }
@@ -141,6 +210,15 @@ export const sessionSynchronizerService = {
     });
 
     return inFlightSynchronization;
+  },
+
+  /**
+   * Drops sessions whose transcripts were deleted, without rescanning any
+   * provider. Only checks that each indexed file still exists, so the watcher
+   * can run it on every delete event.
+   */
+  async pruneDeletedSessions(): Promise<PruneResult> {
+    return pruneDeletedSessions();
   },
 
   /**

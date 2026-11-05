@@ -82,8 +82,55 @@ export function createWatcherIgnoredMatcher(rootPath: string): (filePath: string
 
 const PROJECTS_UPDATE_DEBOUNCE_MS = 500;
 const PROJECTS_UPDATE_MAX_WAIT_MS = 2_000;
+/**
+ * How long after the last delete event the indexed transcripts are checked.
+ * A CLI that sets a transcript aside and writes a new one in its place leaves
+ * the path briefly empty; checking later keeps that session in the index.
+ */
+const REMOVAL_CHECK_DELAY_MS = 1_500;
 
 const watchers: FSWatcher[] = [];
+
+let removalCheckTimer: ReturnType<typeof setTimeout> | null = null;
+let removalCheckInFlight = false;
+let removalCheckRequestedAgain = false;
+
+function scheduleRemovalCheck(): void {
+  if (removalCheckTimer) {
+    clearTimeout(removalCheckTimer);
+  }
+  removalCheckTimer = setTimeout(() => {
+    removalCheckTimer = null;
+    void runRemovalCheck();
+  }, REMOVAL_CHECK_DELAY_MS);
+}
+
+async function runRemovalCheck(): Promise<void> {
+  if (removalCheckInFlight) {
+    removalCheckRequestedAgain = true;
+    return;
+  }
+
+  removalCheckInFlight = true;
+  try {
+    const { removedSessionIds, removedProjectIds } = await sessionSynchronizerService.pruneDeletedSessions();
+    if (removedSessionIds.length > 0 || removedProjectIds.length > 0) {
+      console.log('Removed sessions whose transcripts were deleted', {
+        sessions: removedSessionIds.length,
+        projects: removedProjectIds.length,
+      });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('Session watcher failed to remove deleted sessions', { error: message });
+  } finally {
+    removalCheckInFlight = false;
+    if (removalCheckRequestedAgain) {
+      removalCheckRequestedAgain = false;
+      scheduleRemovalCheck();
+    }
+  }
+}
 
 type PendingWatcherUpdate = {
   providers: Set<LLMProvider>;
@@ -240,6 +287,7 @@ export async function initializeSessionsWatcher(): Promise<void> {
   console.log('Initial session synchronization complete', {
     processedByProvider: initialSync.processedByProvider,
     prunedOrphans: initialSync.prunedOrphans,
+    removedProjects: initialSync.removedProjectIds.length,
     failures: initialSync.failures,
   });
 
@@ -269,6 +317,18 @@ export async function initializeSessionsWatcher(): Promise<void> {
         .on('change', (filePath: string) => {
           void onUpdate('change', filePath, provider);
         })
+        // OpenCode keeps every session in one shared database, so a deleted
+        // file there says nothing about which sessions are gone.
+        .on('unlink', (filePath: string) => {
+          if (provider !== 'opencode' && isWatcherTargetFile(provider, filePath)) {
+            scheduleRemovalCheck();
+          }
+        })
+        .on('unlinkDir', () => {
+          if (provider !== 'opencode') {
+            scheduleRemovalCheck();
+          }
+        })
         .on('error', (error: unknown) => {
           const message = error instanceof Error ? error.message : String(error);
           console.error(`Session watcher error for provider "${provider}"`, { error: message });
@@ -290,6 +350,11 @@ export async function initializeSessionsWatcher(): Promise<void> {
  */
 export async function closeSessionsWatcher(): Promise<void> {
   clearPendingWatcherFlushTimer();
+  if (removalCheckTimer) {
+    clearTimeout(removalCheckTimer);
+    removalCheckTimer = null;
+  }
+  removalCheckRequestedAgain = false;
 
   await Promise.all(
     watchers.map(async (watcher) => {
