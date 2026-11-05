@@ -6,7 +6,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { CODEX_PREDEFINED_MODELS } from '@/modules/providers/list/codex/codex-models.provider.js';
+import {
+  CODEX_PREDEFINED_MODELS,
+  buildCodexModelsFromCatalog,
+} from '@/modules/providers/list/codex/codex-models.provider.js';
 
 const require = createRequire(import.meta.url);
 
@@ -115,4 +118,61 @@ test('bundles a Codex CLI new enough to know the GPT-6 Sol and Luna models', () 
   const { version } = require('@openai/codex/package.json') as { version: string };
   const [major, minor] = version.split('.').map(Number);
   assert.ok(major > 0 || minor >= 155, `bundled @openai/codex ${version} predates 0.155.0`);
+});
+
+const CUSTOM_CATALOG = {
+  models: [
+    {
+      slug: 'gemini-3.8-flash',
+      display_name: 'Gemini 3.8 Flash',
+      description: '',
+      default_reasoning_level: 'ultra',
+      supported_reasoning_levels: [{ effort: 'low', description: 'Fast' }, { effort: 'ultra' }],
+      visibility: 'list',
+      priority: 102,
+    },
+    { slug: 'codex-auto-review', display_name: 'Codex Auto Review', visibility: 'hide', priority: 43 },
+    {
+      slug: 'gpt-6.1-sol',
+      display_name: 'GPT-6.1-Sol',
+      description: 'Workhorse model.',
+      default_reasoning_level: 'medium',
+      supported_reasoning_levels: ['low', 'medium'],
+      visibility: 'list',
+      priority: 2,
+    },
+    { display_name: 'No slug' },
+  ],
+};
+
+test('lists a custom model catalog in priority order under its own names', () => {
+  const catalog = buildCodexModelsFromCatalog(CUSTOM_CATALOG, 'gemini-3.8-flash');
+  assert.deepEqual(catalog?.OPTIONS.map((option) => [option.value, option.label]), [
+    ['gpt-6.1-sol', 'GPT-6.1-Sol'],
+    ['gemini-3.8-flash', 'Gemini 3.8 Flash'],
+  ]);
+  assert.equal(catalog?.DEFAULT, 'gemini-3.8-flash');
+
+  const gemini = catalog?.OPTIONS.find((option) => option.value === 'gemini-3.8-flash');
+  assert.equal(gemini?.description, undefined);
+  assert.deepEqual(gemini?.effort, {
+    default: 'ultra',
+    values: [{ value: 'low', description: 'Fast' }, { value: 'ultra' }],
+  });
+});
+
+test('keeps a hidden catalog model when config.toml selects it', () => {
+  const catalog = buildCodexModelsFromCatalog(CUSTOM_CATALOG, 'codex-auto-review');
+  assert.ok(catalog?.OPTIONS.some((option) => option.value === 'codex-auto-review'));
+  assert.equal(catalog?.DEFAULT, 'codex-auto-review');
+});
+
+test('falls back to the first listed model when the configured one is missing', () => {
+  assert.equal(buildCodexModelsFromCatalog(CUSTOM_CATALOG, 'not-in-catalog')?.DEFAULT, 'gpt-6.1-sol');
+});
+
+test('rejects a catalog with no usable model', () => {
+  assert.equal(buildCodexModelsFromCatalog({ models: [] }), null);
+  assert.equal(buildCodexModelsFromCatalog({ data: [] }), null);
+  assert.equal(buildCodexModelsFromCatalog(null), null);
 });

@@ -13,21 +13,16 @@ import type { ChatMessage, NormalizedMessage } from '@/shared/types';
 
 // The model ids that actually appear on assistant rows in real Claude Code
 // transcripts, taken from a ~86k-row sample of this machine's `~/.claude`.
-describe('the label a reported model is shortened to', () => {
-  it('names the family for a dated or undated id', () => {
-    expect(formatAnsweringModelLabel('claude-opus-5')).toBe('Opus');
-    expect(formatAnsweringModelLabel('claude-sonnet-5')).toBe('Sonnet');
-    expect(formatAnsweringModelLabel('claude-haiku-4-5-20251001')).toBe('Haiku');
-    expect(formatAnsweringModelLabel('claude-fable-5-1')).toBe('Fable');
-    expect(formatAnsweringModelLabel('opus')).toBe('Opus');
+describe('the label a reported model is shown as', () => {
+  it('shows the reported id as is, so gateway routes stay distinguishable', () => {
+    expect(formatAnsweringModelLabel('claude-opus-5')).toBe('claude-opus-5');
+    expect(formatAnsweringModelLabel('claude-opus-4-8')).toBe('claude-opus-4-8');
+    expect(formatAnsweringModelLabel('claude-haiku-4-5-20251001')).toBe('claude-haiku-4-5-20251001');
+    expect(formatAnsweringModelLabel('  gemini-3.8-flash  ')).toBe('gemini-3.8-flash');
   });
 
-  it('keeps a 1M-context id distinct from the base model if one is ever reported', () => {
-    // Claude Code writes the base id on assistant rows today, so this guards
-    // the mapping rather than describing current transcripts: the same family
-    // at a different context window and price must not read as the base.
-    expect(formatAnsweringModelLabel('claude-opus-5[1m]')).toBe('Opus 1M');
-    expect(formatAnsweringModelLabel('claude-opus-5')).toBe('Opus');
+  it('keeps a 1M-context suffix if one is ever reported', () => {
+    expect(formatAnsweringModelLabel('claude-opus-5[1m]')).toBe('claude-opus-5[1m]');
   });
 
   it('shows an unrecognized id verbatim rather than dropping it', () => {
@@ -78,7 +73,7 @@ describe('the model label in the message footer', () => {
 
     const label = container.querySelector('[title="Answered by claude-opus-5"]');
     assert.ok(label, 'the footer must carry the model the provider reported');
-    assert.equal(label?.textContent, 'Opus');
+    assert.equal(label?.textContent, 'claude-opus-5');
   });
 
   it('shows nothing for a reply the provider reported no model for', () => {

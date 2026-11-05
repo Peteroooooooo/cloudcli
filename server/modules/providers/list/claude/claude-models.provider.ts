@@ -1,4 +1,6 @@
 import { readFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 import { sessionsDb } from '@/modules/database/index.js';
 import type { IProviderModels } from '@/shared/interfaces.js';
@@ -10,6 +12,8 @@ import type {
 import {
   buildDefaultProviderCurrentActiveModel,
   isPlaceholderProviderModel,
+  readObjectRecord,
+  readOptionalString,
   stripAnsiSequences,
 } from '@/shared/utils.js';
 
@@ -163,6 +167,110 @@ export const CLAUDE_PREDEFINED_MODELS: ProviderModelsDefinition = {
   DEFAULT: 'default',
 };
 
+/**
+ * The aliases a deployment can pin with `ANTHROPIC_DEFAULT_<KEY>_MODEL`, plus
+ * the `_NAME` / `_DESCRIPTION` companions Claude Code shows in its own picker
+ * when `ANTHROPIC_BASE_URL` points at a gateway.
+ */
+const CLAUDE_PINNABLE_ALIASES = [
+  { alias: 'fable', envKey: 'FABLE', family: 'Fable' },
+  { alias: 'opus', envKey: 'OPUS', family: 'Opus' },
+  { alias: 'sonnet', envKey: 'SONNET', family: 'Sonnet' },
+  { alias: 'haiku', envKey: 'HAIKU', family: 'Haiku' },
+] as const;
+
+const CLAUDE_MODEL_ENV_SUFFIXES = ['', '_NAME', '_DESCRIPTION'] as const;
+
+export type ClaudeModelEnv = Partial<Record<string, string>>;
+
+const claudeUserSettingsPath = (): string => {
+  const configDirectory = process.env.CLAUDE_CONFIG_DIR?.trim();
+  const baseDirectory = configDirectory && path.isAbsolute(configDirectory)
+    ? configDirectory
+    : path.join(os.homedir(), '.claude');
+  return path.join(baseDirectory, 'settings.json');
+};
+
+/**
+ * Reads the model-pinning variables the spawned Claude CLI will see. The
+ * user's settings.json `env` block wins over the server's own environment,
+ * because the CLI applies that block on top of the env it inherits.
+ */
+export const readClaudeModelEnv = async (): Promise<ClaudeModelEnv> => {
+  let settingsEnv: Record<string, unknown> = {};
+  try {
+    const settings = readObjectRecord(JSON.parse(await readFile(claudeUserSettingsPath(), 'utf8')));
+    settingsEnv = readObjectRecord(settings?.env) ?? {};
+  } catch {
+    // A missing or unreadable settings file leaves only the process env.
+  }
+
+  const env: ClaudeModelEnv = {};
+  for (const { envKey } of CLAUDE_PINNABLE_ALIASES) {
+    for (const suffix of CLAUDE_MODEL_ENV_SUFFIXES) {
+      const key = `ANTHROPIC_DEFAULT_${envKey}_MODEL${suffix}`;
+      const value = readOptionalString(settingsEnv[key]) ?? readOptionalString(process.env[key]);
+      if (value) {
+        env[key] = value;
+      }
+    }
+  }
+  return env;
+};
+
+/**
+ * Applies pinned aliases to the built-in catalog the way Claude Code's own
+ * `/model` picker does: a pinned alias is labelled with its `_NAME` (or the
+ * pinned id), and its family's separate 1M row is dropped because the pinned
+ * id already decides the context window.
+ */
+export const applyClaudePinnedModels = (env: ClaudeModelEnv): ProviderModelsDefinition => {
+  const pinned = new Map<string, { name: string; description: string }>();
+  for (const { alias, envKey, family } of CLAUDE_PINNABLE_ALIASES) {
+    const modelId = env[`ANTHROPIC_DEFAULT_${envKey}_MODEL`];
+    if (!modelId) {
+      continue;
+    }
+    pinned.set(alias, {
+      name: env[`ANTHROPIC_DEFAULT_${envKey}_MODEL_NAME`] || modelId,
+      description: env[`ANTHROPIC_DEFAULT_${envKey}_MODEL_DESCRIPTION`] || `Custom ${family} model (${modelId})`,
+    });
+  }
+
+  if (pinned.size === 0) {
+    return CLAUDE_PREDEFINED_MODELS;
+  }
+
+  const options: ProviderModelOption[] = [];
+  for (const option of CLAUDE_PREDEFINED_MODELS.OPTIONS) {
+    const extendedContextAlias = /^([a-z]+)\[1m\]$/.exec(option.value)?.[1];
+    if (extendedContextAlias && pinned.has(extendedContextAlias)) {
+      continue;
+    }
+
+    const pin = pinned.get(option.value);
+    if (pin) {
+      options.push({ ...option, label: pin.name, description: pin.description });
+      continue;
+    }
+
+    if (option.value === 'opusplan' && (pinned.has('opus') || pinned.has('sonnet'))) {
+      const planModel = pinned.get('opus')?.name ?? 'Opus';
+      const executionModel = pinned.get('sonnet')?.name ?? 'Sonnet';
+      options.push({
+        ...option,
+        label: `Opus Plan (${planModel} → ${executionModel})`,
+        description: `Use ${planModel} while planning, then switch to ${executionModel} for execution.`,
+      });
+      continue;
+    }
+
+    options.push(option);
+  }
+
+  return { ...CLAUDE_PREDEFINED_MODELS, OPTIONS: options };
+};
+
 export const findClaudeModelOption = (model: string | undefined | null): ProviderModelOption | null => {
   const normalizedModel = typeof model === 'string' ? model.trim() : '';
   if (!normalizedModel) {
@@ -289,7 +397,7 @@ export class ClaudeProviderModels implements IProviderModels {
     // const supportedModels = await queryInstance.supportedModels();
     // queryInstance.close();
     // return buildClaudeModelsDefinition(supportedModels);
-    return CLAUDE_PREDEFINED_MODELS;
+    return applyClaudePinnedModels(await readClaudeModelEnv());
   }
 
   async getCurrentActiveModel(sessionId?: string): Promise<ProviderCurrentActiveModel> {
