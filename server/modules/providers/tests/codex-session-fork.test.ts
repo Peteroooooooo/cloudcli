@@ -23,14 +23,16 @@ test('a Codex fork asks for the whole thread when no anchor is given', { concurr
       providerSessionId: 'thread-1',
       jsonlPath: '/tmp/rollout-thread-1.jsonl',
       projectPath: '/tmp/workspace',
-      title: 'ignored by codex',
+      title: 'Session (fork)',
     });
     assert.deepEqual(forked, { providerSessionId: 'thread-2', jsonlPath: '/tmp/rollout-thread-2.jsonl' });
   } finally {
     codexAppServer.forkThread = realForkThread;
   }
 
-  assert.deepEqual(forkCalls, [{ threadId: 'thread-1', lastTurnId: undefined, cwd: '/tmp/workspace' }]);
+  // The title goes to Codex too: Codex names a fork after its source, and the
+  // indexer reads Codex's name over this app's row.
+  assert.deepEqual(forkCalls, [{ threadId: 'thread-1', lastTurnId: undefined, cwd: '/tmp/workspace', name: 'Session (fork)' }]);
 });
 
 test('forking from a message cuts through that message\'s turn', async () => {
@@ -55,5 +57,5 @@ test('forking from a message cuts through that message\'s turn', async () => {
   // Inclusive of the turn it names, so the branch keeps the message that was
   // forked from *and* the answer it got. A turn is written as one thing; there
   // is no cut that stops between them.
-  assert.deepEqual(forkCalls, [{ threadId: 'thread-1', lastTurnId: 'turn-b', cwd: '/tmp/workspace' }]);
+  assert.deepEqual(forkCalls, [{ threadId: 'thread-1', lastTurnId: 'turn-b', cwd: '/tmp/workspace', name: undefined }]);
 });

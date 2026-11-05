@@ -6,7 +6,7 @@ import { sessionsDb } from '@/modules/database/index.js';
 import {
   buildLookupMap,
   extractFirstValidJsonlData,
-  findFilesRecursivelyCreatedAfter,
+  findFilesRecursivelyChangedAfter,
   normalizeSessionName,
   readFileTimestamps,
 } from '@/shared/utils.js';
@@ -16,6 +16,12 @@ type ParsedSession = {
   sessionId: string;
   projectPath: string;
   sessionName?: string;
+  /**
+   * True when the name is the one Codex itself shows (`session_index.jsonl`).
+   * It replaces whatever the row holds, including the name a CloudCLI-created
+   * session started with: CloudCLI writes its renames there too.
+   */
+  isExplicitName?: boolean;
 };
 
 /**
@@ -26,11 +32,19 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
   private readonly codexHome = path.join(os.homedir(), '.codex');
 
   /**
+   * Codex appends a line to this index on every rename, so the last line for a
+   * thread is its current name.
+   */
+  private readNameIndex(): Promise<Map<string, string>> {
+    return buildLookupMap(path.join(this.codexHome, 'session_index.jsonl'), 'id', 'thread_name', 'last');
+  }
+
+  /**
    * Scans ~/.codex/sessions and upserts discovered sessions into DB.
    */
   async synchronize(since?: Date): Promise<number> {
-    const nameMap = await buildLookupMap(path.join(this.codexHome, 'session_index.jsonl'), 'id', 'thread_name');
-    const files = await findFilesRecursivelyCreatedAfter(
+    const nameMap = await this.readNameIndex();
+    const files = await findFilesRecursivelyChangedAfter(
       path.join(this.codexHome, 'sessions'),
       '.jsonl',
       since ?? null
@@ -43,27 +57,13 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
         continue;
       }
 
-      const existingSession = sessionsDb.getSessionByProviderSessionId(parsed.sessionId)
-        ?? sessionsDb.getSessionById(parsed.sessionId);
-      if (existingSession) {
-        // If session name is untitled and we now have a name, update it
-        if (existingSession.custom_name === 'Untitled Codex Session' && parsed.sessionName && parsed.sessionName !== 'Untitled Codex Session') {
-          sessionsDb.updateSessionCustomName(existingSession.session_id, parsed.sessionName);
-        }
-      }
-
-      const timestamps = await readFileTimestamps(filePath);
-      sessionsDb.createSession(
-        parsed.sessionId,
-        this.provider,
-        parsed.projectPath,
-        parsed.sessionName,
-        timestamps.createdAt,
-        timestamps.updatedAt,
-        filePath
-      );
+      await this.upsertSession(parsed, filePath);
       processed += 1;
     }
+
+    // A rename in Codex only touches the index, never the rollout, so the
+    // file scan above cannot see renames made while nothing was watching.
+    this.applyNameIndex(nameMap);
 
     return processed;
   }
@@ -76,14 +76,43 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
       return null;
     }
 
-    const nameMap = await buildLookupMap(path.join(this.codexHome, 'session_index.jsonl'), 'id', 'thread_name');
+    const nameMap = await this.readNameIndex();
     const parsed = await this.processSessionFile(filePath, nameMap);
     if (!parsed) {
       return null;
     }
 
+    return this.upsertSession(parsed, filePath);
+  }
+
+  /**
+   * Applies the names in Codex's index to indexed sessions. The watcher runs
+   * this when the index changes, which is how a rename made in Codex reaches
+   * the sidebar.
+   */
+  async synchronizeNames(): Promise<string[]> {
+    return this.applyNameIndex(await this.readNameIndex());
+  }
+
+  private applyNameIndex(nameMap: Map<string, string>): string[] {
+    const renamedSessionIds: string[] = [];
+    for (const row of sessionsDb.getSessionNamesByProvider(this.provider)) {
+      const indexedName = nameMap.get(row.provider_session_id ?? row.session_id);
+      if (!indexedName?.trim()) {
+        continue;
+      }
+      const name = normalizeSessionName(indexedName, 'Untitled Codex Session');
+      if (row.custom_name !== name) {
+        sessionsDb.updateSessionCustomName(row.session_id, name);
+        renamedSessionIds.push(row.session_id);
+      }
+    }
+    return renamedSessionIds;
+  }
+
+  private async upsertSession(parsed: ParsedSession, filePath: string): Promise<string> {
     const timestamps = await readFileTimestamps(filePath);
-    return sessionsDb.createSession(
+    const rowId = sessionsDb.createSession(
       parsed.sessionId,
       this.provider,
       parsed.projectPath,
@@ -92,6 +121,18 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
       timestamps.updatedAt,
       filePath
     );
+
+    // `createSession` keeps the name of a session CloudCLI created, so a name
+    // given in Codex, or a first real name for an untitled row, has to be
+    // applied to that row explicitly.
+    const storedName = sessionsDb.getSessionById(rowId)?.custom_name;
+    const hasRealName = Boolean(parsed.sessionName) && parsed.sessionName !== 'Untitled Codex Session';
+    const replacesStored = parsed.isExplicitName || storedName === 'Untitled Codex Session';
+    if (hasRealName && replacesStored && storedName !== parsed.sessionName) {
+      sessionsDb.updateSessionCustomName(rowId, parsed.sessionName!);
+    }
+
+    return rowId;
   }
 
   /**
@@ -131,6 +172,17 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
       return null;
     }
 
+    // The name Codex shows wins over the stored one: renames made in Codex reach
+    // CloudCLI, and CloudCLI's own renames are written to the same index.
+    const indexedName = nameMap.get(parsed.sessionId);
+    if (indexedName?.trim()) {
+      return {
+        ...parsed,
+        sessionName: normalizeSessionName(indexedName, 'Untitled Codex Session'),
+        isExplicitName: true,
+      };
+    }
+
     // App-created sessions are keyed by an app id, so disk-discovered provider
     // ids must be resolved through the provider-id mapping first.
     const existingSession = sessionsDb.getSessionByProviderSessionId(parsed.sessionId)
@@ -143,10 +195,7 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
       };
     }
 
-    let sessionName = nameMap.get(parsed.sessionId);
-    if (!sessionName) {
-      sessionName = await this.extractLastAgentMessageFromEnd(filePath);
-    }
+    const sessionName = await this.extractLastAgentMessageFromEnd(filePath);
 
     return {
       ...parsed,

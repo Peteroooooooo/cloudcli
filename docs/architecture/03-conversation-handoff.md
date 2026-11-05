@@ -442,6 +442,17 @@ the index; and only for providers whose sync succeeded in that pass. The session
 runs the same pass about 1.5 s after a transcript or folder is deleted, and every pass that
 removes something broadcasts `sessions_removed` so open sidebars drop the rows at once.
 
+Session names are shared with the CLI. A rename in CloudCLI goes to the provider first
+(`sessionTitle.setTitle`: the Agent SDK's `renameSession` appends Claude's `custom-title`
+line, and Codex's `thread/name/set` writes `session_index.jsonl`), then to the row; a
+failed provider write fails the rename. In the other direction the provider's own name wins
+over the row: the Claude synchronizer reads the last `custom-title` in a transcript's final
+64 KB, and the Codex synchronizer takes the last `session_index.jsonl` entry, which the
+watcher also polls on its own because a Codex rename never touches the rollout. Only a
+missing provider name leaves the row's name in place. The incremental scan includes files
+written since the last scan as well as new ones, so renames and turns made while the server
+was stopped are picked up at start.
+
 The sidebar's `session_upserted` reducer in `useProjectsState.ts` then does five things:
 
 1. Matches an existing row by alias id (`sessionId`, `providerSessionId`, `session.id`) and

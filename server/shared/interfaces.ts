@@ -75,6 +75,30 @@ export interface IProvider {
    * its absence is what makes "fork session" unavailable.
    */
   readonly fork?: IProviderFork;
+  /**
+   * Writes a session's name into the provider's own storage. Present only for
+   * providers whose CLI shows a name CloudCLI can set; without it a rename
+   * stays inside CloudCLI.
+   */
+  readonly sessionTitle?: IProviderSessionTitle;
+}
+
+// ---------------------------
+//----------------- PROVIDER SESSION TITLE INTERFACE ------------
+/**
+ * Session naming contract for one provider.
+ */
+export interface IProviderSessionTitle {
+  /**
+   * Stores `title` as the session's name where the provider CLI reads it, so
+   * the CLI's own session list shows the name given in CloudCLI.
+   */
+  setTitle(input: {
+    providerSessionId: string;
+    /** The transcript the session row points at; null before the first run. */
+    jsonlPath: string | null;
+    title: string;
+  }): Promise<void>;
 }
 
 // ---------------------------
@@ -275,4 +299,11 @@ export interface IProviderSessionSynchronizer {
    * Parses and upserts one provider artifact file without running a full scan.
    */
   synchronizeFile(filePath: string): Promise<string | null>;
+
+  /**
+   * Re-reads names a provider keeps outside its transcripts (Codex's
+   * session_index.jsonl) and applies them to indexed sessions. Returns the
+   * app-facing ids of the sessions whose name changed.
+   */
+  synchronizeNames?(): Promise<string[]>;
 }

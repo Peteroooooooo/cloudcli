@@ -747,14 +747,40 @@ export const sessionsService = {
 
   /**
    * Renames one session by id without requiring the caller to pass provider.
+   *
+   * The name is written to the provider first (Claude's transcript, Codex's
+   * thread index) so the CLI shows it too, then to the index. The session
+   * synchronizers read a provider's own name over the index's, so a name kept
+   * only in the index would be replaced the next time the CLI renamed the
+   * session; a failed write therefore fails the rename instead.
    */
-  renameSessionById(sessionId: string, summary: string): { sessionId: string; summary: string } {
+  async renameSessionById(sessionId: string, summary: string): Promise<{ sessionId: string; summary: string }> {
     const session = sessionsDb.getSessionById(sessionId);
     if (!session) {
       throw new AppError(`Session "${sessionId}" was not found.`, {
         code: 'SESSION_NOT_FOUND',
         statusCode: 404,
       });
+    }
+
+    const sessionTitle = providerRegistry.resolveProvider(session.provider as LLMProvider).sessionTitle;
+    // A session CloudCLI created has no provider session until its first run;
+    // there is nothing to name on the provider's side yet.
+    if (sessionTitle && session.provider_session_id) {
+      try {
+        await sessionTitle.setTitle({
+          providerSessionId: session.provider_session_id,
+          jsonlPath: session.jsonl_path,
+          title: summary,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('Could not write the session name to the provider', { sessionId, provider: session.provider, error: message });
+        throw new AppError(`The name could not be saved to ${session.provider}: ${message}`, {
+          code: 'SESSION_RENAME_FAILED',
+          statusCode: 502,
+        });
+      }
     }
 
     sessionsDb.updateSessionCustomName(sessionId, summary);

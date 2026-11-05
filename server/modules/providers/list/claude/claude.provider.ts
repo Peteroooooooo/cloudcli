@@ -5,6 +5,7 @@ import { claudeRuntime } from '@/modules/providers/list/claude/claude-runtime.pr
 import { ClaudeForkProvider } from '@/modules/providers/list/claude/claude-fork.provider.js';
 import { ClaudeMcpProvider } from '@/modules/providers/list/claude/claude-mcp.provider.js';
 import { ClaudeSessionSynchronizer } from '@/modules/providers/list/claude/claude-session-synchronizer.provider.js';
+import { ClaudeSessionTitleProvider } from '@/modules/providers/list/claude/claude-session-title.provider.js';
 import { ClaudeSessionsProvider } from '@/modules/providers/list/claude/claude-sessions.provider.js';
 import { ClaudeSkillsProvider } from '@/modules/providers/list/claude/claude-skills.provider.js';
 import type {
@@ -13,6 +14,7 @@ import type {
   IProviderModels,
   IProviderRuntime,
   IProviderSessionSynchronizer,
+  IProviderSessionTitle,
   IProviderSkills,
   IProviderSessions,
 } from '@/shared/interfaces.js';
@@ -26,6 +28,7 @@ export class ClaudeProvider extends AbstractProvider {
   readonly sessions: IProviderSessions = new ClaudeSessionsProvider();
   readonly sessionSynchronizer: IProviderSessionSynchronizer = new ClaudeSessionSynchronizer();
   readonly fork: IProviderFork = new ClaudeForkProvider();
+  readonly sessionTitle: IProviderSessionTitle = new ClaudeSessionTitleProvider();
 
   constructor() {
     super('claude');

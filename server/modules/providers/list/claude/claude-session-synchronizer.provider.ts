@@ -3,10 +3,11 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 
 import { sessionsDb } from '@/modules/database/index.js';
+import { readLatestCustomTitle } from '@/modules/providers/list/claude/claude-session-title.provider.js';
 import {
   buildLookupMap,
   extractFirstValidJsonlData,
-  findFilesRecursivelyCreatedAfter,
+  findFilesRecursivelyChangedAfter,
   normalizeSessionName,
   readFileTimestamps,
 } from '@/shared/utils.js';
@@ -16,6 +17,12 @@ type ParsedSession = {
   sessionId: string;
   projectPath: string;
   sessionName?: string;
+  /**
+   * True when the name came from a rename (`/rename` in Claude, or CloudCLI
+   * writing the same line). Such a name replaces whatever the row holds,
+   * including the name a CloudCLI-created session started with.
+   */
+  isExplicitName?: boolean;
 };
 
 /**
@@ -47,7 +54,7 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
    */
   async synchronize(since?: Date): Promise<number> {
     const nameMap = await buildLookupMap(path.join(this.claudeHome, 'history.jsonl'), 'sessionId', 'display');
-    const files = await findFilesRecursivelyCreatedAfter(
+    const files = await findFilesRecursivelyChangedAfter(
       path.join(this.claudeHome, 'projects'),
       '.jsonl',
       since ?? null
@@ -64,16 +71,7 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
         continue;
       }
 
-      const timestamps = await readFileTimestamps(filePath);
-      sessionsDb.createSession(
-        parsed.sessionId,
-        this.provider,
-        parsed.projectPath,
-        parsed.sessionName,
-        timestamps.createdAt,
-        timestamps.updatedAt,
-        filePath
-      );
+      await this.upsertSession(parsed, filePath);
       processed += 1;
     }
 
@@ -97,8 +95,12 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
       return null;
     }
 
+    return this.upsertSession(parsed, filePath);
+  }
+
+  private async upsertSession(parsed: ParsedSession, filePath: string): Promise<string> {
     const timestamps = await readFileTimestamps(filePath);
-    return sessionsDb.createSession(
+    const rowId = sessionsDb.createSession(
       parsed.sessionId,
       this.provider,
       parsed.projectPath,
@@ -107,6 +109,15 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
       timestamps.updatedAt,
       filePath
     );
+
+    // `createSession` keeps the name of a session CloudCLI created, so a rename
+    // made in the CLI has to be applied to that row explicitly.
+    if (parsed.isExplicitName && parsed.sessionName
+      && sessionsDb.getSessionById(rowId)?.custom_name !== parsed.sessionName) {
+      sessionsDb.updateSessionCustomName(rowId, parsed.sessionName);
+    }
+
+    return rowId;
   }
 
   /**
@@ -133,6 +144,17 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
 
     if (!parsed) {
       return null;
+    }
+
+    // A rename wins over the stored name: renames made in the CLI reach
+    // CloudCLI, and CloudCLI's own renames are written as the same line.
+    const renamedTo = await readLatestCustomTitle(filePath, parsed.sessionId);
+    if (renamedTo) {
+      return {
+        ...parsed,
+        sessionName: normalizeSessionName(renamedTo, 'Untitled Claude Session'),
+        isExplicitName: true,
+      };
     }
 
     // App-created sessions are keyed by an app id, so disk-discovered provider

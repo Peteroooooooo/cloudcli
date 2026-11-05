@@ -203,11 +203,17 @@ export const codexAppServer = {
    * and that field is what the session indexer keys a session's project off —
    * omitting it would file every fork under whatever directory this server
    * happens to be running from.
+   *
+   * `name` is set on the copy in the same exchange. Codex gives a fork its
+   * source's name, and the session indexer takes Codex's name over the one in
+   * this app's row, so an unnamed fork would show up under the source's name.
+   * A failed naming does not undo the fork that already exists.
    */
   async forkThread(input: {
     threadId: string;
     lastTurnId?: string;
     cwd: string;
+    name?: string;
   }): Promise<CodexThreadFork> {
     return withAppServer(async (call) => {
       const result = await call('thread/fork', {
@@ -237,7 +243,29 @@ export const codexAppServer = {
         });
       }
 
+      const name = input.name?.trim();
+      if (name) {
+        try {
+          await call('thread/name/set', { threadId, name });
+        } catch (error) {
+          console.warn('Codex fork was created but could not be named', {
+            threadId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
       return { threadId, path };
+    });
+  },
+
+  /**
+   * Names a thread in Codex itself (`session_index.jsonl` and the thread
+   * database), which is where `codex resume` and the IDE read names from.
+   */
+  async setThreadName(input: { threadId: string; name: string }): Promise<void> {
+    await withAppServer(async (call) => {
+      await call('thread/name/set', { threadId: input.threadId, name: input.name });
     });
   },
 };

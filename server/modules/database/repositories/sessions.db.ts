@@ -727,4 +727,23 @@ export const sessionsDb = {
       )
       .all() as Array<{ session_id: string; provider: string; project_path: string | null; jsonl_path: string }>;
   },
+
+  /**
+   * Every row of one provider with the name it shows, archived ones included.
+   * Used to apply names a provider keeps in an index of its own.
+   */
+  getSessionNamesByProvider(provider: string): Array<{
+    session_id: string;
+    provider_session_id: string | null;
+    custom_name: string | null;
+  }> {
+    const db = getConnection();
+    return db
+      .prepare(
+        `SELECT session_id, provider_session_id, custom_name
+         FROM sessions
+         WHERE provider = ?`
+      )
+      .all(provider) as Array<{ session_id: string; provider_session_id: string | null; custom_name: string | null }>;
+  },
 };

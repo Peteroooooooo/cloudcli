@@ -30,6 +30,17 @@ const PROVIDER_WATCH_PATHS: Array<{ provider: LLMProvider; rootPath: string }> =
 ];
 
 /**
+ * Files where a provider keeps session names apart from its transcripts.
+ * Codex records a rename only here, so watching the rollouts never sees one.
+ */
+const PROVIDER_NAME_INDEX_PATHS: Array<{ provider: LLMProvider; filePath: string }> = [
+  {
+    provider: 'codex',
+    filePath: path.join(os.homedir(), '.codex', 'session_index.jsonl'),
+  },
+];
+
+/**
  * What the watcher never descends into or reports. These used to be glob
  * strings, which chokidar v4 no longer understands: it takes a path, a RegExp
  * or a function, so the globs matched nothing and every file under every
@@ -277,6 +288,23 @@ async function onUpdate(
   }
 }
 
+async function onNameIndexUpdate(provider: LLMProvider): Promise<void> {
+  try {
+    const renamedSessionIds = await sessionSynchronizerService.synchronizeProviderNames(provider);
+    if (renamedSessionIds.length === 0) {
+      return;
+    }
+
+    console.log(`Session names updated from the "${provider}" name index`, { sessions: renamedSessionIds.length });
+    for (const sessionId of renamedSessionIds) {
+      queuePendingWatcherUpdate('change', provider, sessionId);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Session watcher failed to read the "${provider}" name index`, { error: message });
+  }
+}
+
 /**
  * Starts provider filesystem watchers and performs initial DB synchronization.
  */
@@ -339,6 +367,40 @@ export async function initializeSessionsWatcher(): Promise<void> {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`Failed to initialize session watcher for provider "${provider}"`, {
         rootPath,
+        error: message,
+      });
+    }
+  }
+
+  // One small file each, polled like the transcript roots. A file that does
+  // not exist yet is reported with `add` once the provider creates it.
+  for (const { provider, filePath } of PROVIDER_NAME_INDEX_PATHS) {
+    try {
+      const watcher = chokidar.watch(filePath, {
+        persistent: true,
+        ignoreInitial: true,
+        usePolling: true,
+        interval: 6_000,
+        binaryInterval: 6_000,
+      });
+
+      watcher
+        .on('add', () => {
+          void onNameIndexUpdate(provider);
+        })
+        .on('change', () => {
+          void onNameIndexUpdate(provider);
+        })
+        .on('error', (error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`Session name index watcher error for provider "${provider}"`, { error: message });
+        });
+
+      watchers.push(watcher);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`Failed to watch the session name index for provider "${provider}"`, {
+        filePath,
         error: message,
       });
     }

@@ -1181,11 +1181,14 @@ export function sanitizeLeafDirectoryName(inputName: string, label = 'directory 
  * Recursively discovers files that match one extension, with optional incremental filtering.
  *
  * Provider synchronizers call this to find transcript artifacts under provider
- * home directories. Pass `lastScanAt` to include only files created after the
- * previous scan, or pass `null` to perform a full rescan. Missing directories
- * are treated as empty because not every provider exists on every machine.
+ * home directories. Pass `lastScanAt` to include only files created or written
+ * after the previous scan, or pass `null` to perform a full rescan. Written
+ * files count too: a conversation continued or renamed in the CLI while this
+ * server was stopped only changes an existing file, and the watcher never sees
+ * changes made before it started. Missing directories are treated as empty
+ * because not every provider exists on every machine.
  */
-export async function findFilesRecursivelyCreatedAfter(
+export async function findFilesRecursivelyChangedAfter(
   rootDir: string,
   extension: string,
   lastScanAt: Date | null,
@@ -1197,7 +1200,7 @@ export async function findFilesRecursivelyCreatedAfter(
       const fullPath = path.join(rootDir, entry.name);
 
       if (entry.isDirectory()) {
-        await findFilesRecursivelyCreatedAfter(fullPath, extension, lastScanAt, fileList);
+        await findFilesRecursivelyChangedAfter(fullPath, extension, lastScanAt, fileList);
         continue;
       }
 
@@ -1211,7 +1214,7 @@ export async function findFilesRecursivelyCreatedAfter(
       }
 
       const fileStat = await stat(fullPath);
-      if (fileStat.birthtime > lastScanAt) {
+      if (fileStat.birthtime > lastScanAt || fileStat.mtime > lastScanAt) {
         fileList.push(fullPath);
       }
     }
@@ -1246,16 +1249,19 @@ export async function readFileTimestamps(
 // ---------------------------
 //----------------- SESSION SYNCHRONIZER JSONL PARSING HELPERS ------------
 /**
- * Builds a first-seen key/value lookup map from a JSONL file.
+ * Builds a key/value lookup map from a JSONL file.
  *
  * Use this for provider index files where session id -> display name metadata
- * is stored line-by-line. The first value for each key wins, preserving the
- * earliest known label while avoiding repeated map overwrites.
+ * is stored line-by-line. By default the first value for each key wins, which
+ * suits a log whose first entry is the label (Claude's history.jsonl, where it
+ * is the first prompt). Pass `keep: 'last'` for an index that appends a new
+ * entry on every rename (Codex's session_index.jsonl), where the latest wins.
  */
 export async function buildLookupMap(
   filePath: string,
   keyField: string,
-  valueField: string
+  valueField: string,
+  keep: 'first' | 'last' = 'first'
 ): Promise<Map<string, string>> {
   const lookup = new Map<string, string>();
 
@@ -1281,7 +1287,7 @@ export async function buildLookupMap(
       const key = parsed[keyField];
       const value = parsed[valueField];
 
-      if (typeof key === 'string' && typeof value === 'string' && !lookup.has(key)) {
+      if (typeof key === 'string' && typeof value === 'string' && (keep === 'last' || !lookup.has(key))) {
         lookup.set(key, value);
       }
     }

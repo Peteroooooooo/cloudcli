@@ -236,4 +236,13 @@ export const sessionSynchronizerService = {
       sessionId,
     };
   },
+
+  /**
+   * Applies the names a provider keeps outside its transcripts. Returns the
+   * app-facing ids of the sessions that were renamed.
+   */
+  async synchronizeProviderNames(provider: LLMProvider): Promise<string[]> {
+    const synchronizer = providerRegistry.resolveProvider(provider).sessionSynchronizer;
+    return synchronizer.synchronizeNames ? synchronizer.synchronizeNames() : [];
+  },
 };

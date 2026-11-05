@@ -4,7 +4,7 @@ import type { TFunction } from 'i18next';
 import { api } from '@/shared/api';
 import { subscribeToUserPreferences } from '@/shared/userSettings';
 import { usePaletteOps } from '@/modules/command-palette';
-import type { ArchivedProjectListItem, ArchivedSessionListItem, ConversationProjectResult, ConversationSearchResults, LLMProvider, Project, ProjectSession, ProjectSortOrder, RecentConversationListItem, SearchProgress, ActiveSidebarRename, PendingSidebarDeletion, SessionTitleSearchResult, SessionWithProvider, SidebarSearchMode, SidebarSessionSelection } from '@/shared/types';
+import type { ArchivedProjectListItem, ArchivedSessionListItem, ConversationProjectResult, ConversationSearchResults, LLMProvider, Project, ProjectSession, ProjectSortOrder, RecentConversationListItem, SearchProgress, ActiveSidebarRename, PendingSidebarDeletion, ServerEvent, SessionTitleSearchResult, SessionWithProvider, SidebarSearchMode, SidebarSessionSelection } from '@/shared/types';
 import {
   filterProjects,
   getAllSessions,
@@ -75,6 +75,8 @@ type UseSidebarControllerArgs = {
   setSidebarVisible: (visible: boolean) => void;
   sidebarVisible: boolean;
   keepProjectsExpanded?: boolean;
+  /** The websocket frame feed; used to drop rows for sessions deleted outside the app. */
+  subscribe?: (listener: (event: ServerEvent) => void) => () => void;
 };
 
 /** Used by Sidebar to coordinate project navigation, expansion and session actions. */
@@ -97,6 +99,7 @@ export function useSidebarController({
   setSidebarVisible,
   sidebarVisible,
   keepProjectsExpanded = false,
+  subscribe,
 }: UseSidebarControllerArgs) {
   const paletteOps = usePaletteOps();
   // Remember whether a saved set existed before the first persistence effect.
@@ -393,6 +396,38 @@ export function useSidebarController({
 
     reloadRecentConversations();
   }, [debouncedSearchQuery, reloadRecentConversations, searchMode]);
+
+  // The Conversations and archived lists are fetched once and kept, while the
+  // project list drops a session the moment its transcript is deleted outside
+  // the app. Drop it here too, or the row stays until the tab is reopened.
+  // Counted outside the updater: React may run an updater twice, which would
+  // take the rows off the total twice.
+  useEffect(() => {
+    if (!subscribe) {
+      return undefined;
+    }
+
+    return subscribe((event) => {
+      if (event.kind !== 'sessions_removed' || !Array.isArray(event.sessionIds)) {
+        return;
+      }
+      const removedIds = new Set(event.sessionIds.filter((id): id is string => typeof id === 'string'));
+      if (removedIds.size === 0) {
+        return;
+      }
+
+      const removedFromRecent = recentConversations.filter((conversation) => removedIds.has(conversation.sessionId)).length;
+      if (removedFromRecent > 0) {
+        setRecentConversations((previous) => previous.filter((conversation) => !removedIds.has(conversation.sessionId)));
+        setRecentConversationsTotal((total) => Math.max(0, total - removedFromRecent));
+      }
+      setArchivedSessions((previous) => (
+        previous.some((session) => removedIds.has(session.sessionId))
+          ? previous.filter((session) => !removedIds.has(session.sessionId))
+          : previous
+      ));
+    });
+  }, [recentConversations, subscribe]);
 
   // The Conversations list is only fetched when its tab opens, while `projects`
   // is patched the moment a session is renamed from the workspace header. Fold

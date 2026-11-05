@@ -23,13 +23,13 @@ export class CodexForkProvider implements IProviderFork {
     upToAnchorId?: string;
     title?: string;
   }): Promise<{ providerSessionId: string; jsonlPath: string }> {
-    // `title` is deliberately not forwarded. The sidebar name lives in this
-    // app's own session row, and naming the thread inside Codex would mean a
-    // second call that could fail after the fork already succeeded.
+    // The copy is named in the same app-server exchange: Codex would otherwise
+    // give it the source's name, which the indexer reads over this app's row.
     const fork = await codexAppServer.forkThread({
       threadId: input.providerSessionId,
       lastTurnId: input.upToAnchorId,
       cwd: input.projectPath,
+      name: input.title,
     });
 
     // The path is the one the server reported and already confirmed on disk,
