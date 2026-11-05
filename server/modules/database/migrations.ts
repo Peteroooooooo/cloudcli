@@ -489,6 +489,73 @@ const ensureProjectsForSessionPaths = (db: Database): void => {
   `);
 };
 
+type DriveLetterProjectRow = {
+  project_id: string;
+  project_path: string;
+  custom_project_name: string | null;
+  isStarred: number | null;
+  isArchived: number | null;
+};
+
+/**
+ * Moves projects stored with a lower-case Windows drive letter (`d:\...`) onto
+ * the upper-case spelling `normalizeProjectPath` produces, so a folder that
+ * was recorded both ways becomes one project.
+ *
+ * When both spellings exist, the sessions move to the upper-case project. It
+ * keeps a star or custom name either one had, and stays archived only if both
+ * were, so nothing that was visible gets hidden. Otherwise the row is renamed
+ * in place and keeps its id.
+ */
+const mergeLowerCaseDriveLetterProjects = (db: Database): void => {
+  const rows = db
+    .prepare(`
+      SELECT project_id, project_path, custom_project_name, isStarred, isArchived
+      FROM projects
+      WHERE project_path GLOB '[a-z]:*'
+    `)
+    .all() as DriveLetterProjectRow[];
+  if (rows.length === 0) {
+    return;
+  }
+
+  console.log(`Running migration: Upper-casing the drive letter of ${rows.length} project path(s)`);
+  const findProject = db.prepare(`
+    SELECT project_id, project_path, custom_project_name, isStarred, isArchived
+    FROM projects
+    WHERE project_path = ?
+  `);
+  const updateFlags = db.prepare(`
+    UPDATE projects SET custom_project_name = ?, isStarred = ?, isArchived = ? WHERE project_id = ?
+  `);
+  const renameProject = db.prepare('UPDATE projects SET project_path = ? WHERE project_id = ?');
+  const moveSessions = db.prepare('UPDATE sessions SET project_path = ? WHERE project_path = ?');
+  const moveDraft = db.prepare('UPDATE OR IGNORE session_drafts SET draft_scope = ? WHERE draft_scope = ?');
+  const deleteProject = db.prepare('DELETE FROM projects WHERE project_id = ?');
+
+  db.transaction(() => {
+    for (const row of rows) {
+      const target = row.project_path[0].toUpperCase() + row.project_path.slice(1);
+      const existing = findProject.get(target) as DriveLetterProjectRow | undefined;
+      if (!existing) {
+        renameProject.run(target, row.project_id);
+        moveSessions.run(target, row.project_path);
+        continue;
+      }
+
+      updateFlags.run(
+        existing.custom_project_name ?? row.custom_project_name,
+        existing.isStarred || row.isStarred ? 1 : 0,
+        existing.isArchived && row.isArchived ? 1 : 0,
+        existing.project_id,
+      );
+      moveSessions.run(target, row.project_path);
+      moveDraft.run(`project:${existing.project_id}`, `project:${row.project_id}`);
+      deleteProject.run(row.project_id);
+    }
+  })();
+};
+
 export const runMigrations = (db: Database) => {
   try {
     const usersTableInfo = db.prepare('PRAGMA table_info(users)').all() as { name: string }[];
@@ -534,6 +601,7 @@ export const runMigrations = (db: Database) => {
     addSessionEffortColumn(db);
     addForkedFromSessionIdColumn(db);
     ensureProjectsForSessionPaths(db);
+    mergeLowerCaseDriveLetterProjects(db);
     db.exec(SCHEDULED_MESSAGES_TABLE_SCHEMA_SQL);
 
     db.exec('CREATE INDEX IF NOT EXISTS idx_session_ids_lookup ON sessions(session_id)');

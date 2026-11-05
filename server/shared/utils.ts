@@ -294,6 +294,12 @@ function stripWindowsLongPathPrefix(inputPath: string): string {
   return inputPath;
 }
 
+function upperCaseWindowsDriveLetter(windowsPath: string): string {
+  return /^[a-z]:/.test(windowsPath)
+    ? windowsPath[0].toUpperCase() + windowsPath.slice(1)
+    : windowsPath;
+}
+
 function shouldUseWindowsPathNormalization(inputPath: string): boolean {
   if (process.platform === 'win32') {
     return true;
@@ -309,7 +315,14 @@ function shouldUseWindowsPathNormalization(inputPath: string): boolean {
  * - trim whitespace
  * - strip Windows long-path prefixes (`\\?\` and `\\?\UNC\`)
  * - normalize path separators and dot segments
+ * - upper-case a Windows drive letter
  * - trim trailing separators except for filesystem roots
+ *
+ * Tools disagree on the drive letter: VS Code (and so the Claude Code
+ * extension) writes `d:\`, while Windows, Codex and the Claude CLI write `D:\`.
+ * Both name the same folder, so without one spelling a folder used from both
+ * shows up as two projects. The rest of the path is kept as given; looking up
+ * its real spelling would also follow junctions and fails for deleted folders.
  */
 export function normalizeProjectPath(inputPath: string): string {
   if (typeof inputPath !== 'string') {
@@ -324,7 +337,7 @@ export function normalizeProjectPath(inputPath: string): string {
   const withoutLongPrefix = stripWindowsLongPathPrefix(trimmed);
   const useWindowsPathRules = shouldUseWindowsPathNormalization(withoutLongPrefix);
   const normalized = useWindowsPathRules
-    ? path.win32.normalize(withoutLongPrefix)
+    ? upperCaseWindowsDriveLetter(path.win32.normalize(withoutLongPrefix))
     : path.posix.normalize(withoutLongPrefix);
 
   if (!normalized) {
