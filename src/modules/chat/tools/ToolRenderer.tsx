@@ -232,7 +232,10 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
             <ToolDiffViewer
               {...contentProps}
               createDiff={createDiff}
-              onFileClick={() => onFileOpen?.(contentProps.filePath)}
+              onFileClick={() => onFileOpen?.(contentProps.filePath, {
+                old_string: contentProps.oldContent,
+                new_string: contentProps.newContent
+              })}
             />
           );
         }
