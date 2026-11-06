@@ -2059,7 +2059,7 @@ test('synchronizeFile falls back to Untitled Claude Session when all sources are
 // Priority: DB custom_name > JSONL title > history.jsonl
 // ---------------------------------------------------------------------------
 
-test('synchronizeFile preserves existing DB custom_name regardless of JSONL and history.jsonl', { concurrency: false }, async () => {
+test('synchronizeFile replaces a stored DB custom_name with the ai-title Claude shows', { concurrency: false }, async () => {
   const tmp = await mkdtemp(path.join(os.tmpdir(), 'claude-sync-dbwins-'));
   const workspacePath = path.join(tmp, 'workspace');
   await mkdir(workspacePath, { recursive: true });
@@ -2081,12 +2081,12 @@ test('synchronizeFile preserves existing DB custom_name regardless of JSONL and 
     ]);
 
     await withIsolatedDatabase(async () => {
-      // Pre-seed the DB with a custom_name set via CloudCLI sidebar rename.
+      // Pre-seed the DB with the name CloudCLI stored before the title existed.
       sessionsDb.createSession(
         'test-session-1',
         'claude',
         workspacePath,
-        'Sidebar custom name',
+        'first prompt',
       );
 
       const synchronizer = new ClaudeSessionSynchronizer();
@@ -2096,8 +2096,9 @@ test('synchronizeFile preserves existing DB custom_name regardless of JSONL and 
 
       assert.ok(result);
       const session = sessionsDb.getSessionById(result!);
-      // DB custom_name must win over JSONL ai-title AND history.jsonl display.
-      assert.equal(session?.custom_name, 'Sidebar custom name');
+      // A name stored before Claude wrote its title (e.g. the first prompt)
+      // gives way to the title Claude Code shows; history.jsonl never wins.
+      assert.equal(session?.custom_name, 'JSONL ai title');
     });
   } finally {
     restoreHomeDir();

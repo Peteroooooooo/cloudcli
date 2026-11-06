@@ -31,7 +31,7 @@ async function readTailLines(filePath: string, bytes: number): Promise<string[]>
   }
 }
 
-type TitleEvents = { customTitle?: string; hasAgentName: boolean };
+type TitleEvents = { customTitle?: string; aiTitle?: string; hasAgentName: boolean };
 
 async function readTitleEvents(filePath: string, sessionId: string): Promise<TitleEvents> {
   const events: TitleEvents = { hasAgentName: false };
@@ -44,7 +44,7 @@ async function readTitleEvents(filePath: string, sessionId: string): Promise<Tit
 
   for (const line of lines) {
     // Cheap filter before JSON.parse: most lines in the window are messages.
-    if (!line.includes('"custom-title"') && !line.includes('"agent-name"')) {
+    if (!line.includes('"custom-title"') && !line.includes('"ai-title"') && !line.includes('"agent-name"')) {
       continue;
     }
     let data: Record<string, unknown>;
@@ -58,6 +58,8 @@ async function readTitleEvents(filePath: string, sessionId: string): Promise<Tit
     }
     if (data.type === 'custom-title' && typeof data.customTitle === 'string' && data.customTitle.trim()) {
       events.customTitle = data.customTitle;
+    } else if (data.type === 'ai-title' && typeof data.aiTitle === 'string' && data.aiTitle.trim()) {
+      events.aiTitle = data.aiTitle;
     } else if (data.type === 'agent-name') {
       events.hasAgentName = true;
     }
@@ -71,6 +73,17 @@ async function readTitleEvents(filePath: string, sessionId: string): Promise<Tit
  */
 export async function readLatestCustomTitle(filePath: string, sessionId: string): Promise<string | undefined> {
   return (await readTitleEvents(filePath, sessionId)).customTitle;
+}
+
+/**
+ * The title Claude Code itself shows for the session (its session picker and
+ * the IDE tab): the last `/rename` if there is one, otherwise the title Claude
+ * generated (`ai-title`), which it writes after the first reply and updates as
+ * the conversation goes on. Undefined when neither is near the end of the file.
+ */
+export async function readClaudeShownTitle(filePath: string, sessionId: string): Promise<string | undefined> {
+  const events = await readTitleEvents(filePath, sessionId);
+  return events.customTitle ?? events.aiTitle;
 }
 
 /**

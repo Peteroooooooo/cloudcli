@@ -92,11 +92,30 @@ test('a /rename made in Claude replaces the name CloudCLI already stored', { con
   }
 });
 
-test('a Claude session with no /rename keeps the name CloudCLI stored', { concurrency: false }, async () => {
+test('a Claude session with no /rename takes the title Claude generated, as Claude Code shows it', { concurrency: false }, async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'claude-no-rename-'));
   const restoreHomeDir = patchHomeDir(home);
   try {
     const filePath = await writeClaudeTranscript(home);
+    await withIsolatedDatabase(async () => {
+      sessionsDb.createAppSession('app-1', 'claude', '/workspace/demo', 'Started in CloudCLI');
+      sessionsDb.assignProviderSessionId('app-1', SESSION_ID);
+      await new ClaudeSessionSynchronizer().synchronizeFile(filePath);
+      assert.equal(sessionsDb.getSessionById('app-1')?.custom_name, 'Generated title');
+    });
+  } finally {
+    restoreHomeDir();
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test('a Claude session with no title yet keeps the name CloudCLI stored', { concurrency: false }, async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'claude-no-title-yet-'));
+  const restoreHomeDir = patchHomeDir(home);
+  try {
+    const filePath = await writeClaudeTranscript(home);
+    const firstLine = (await readFile(filePath, 'utf8')).split('\n')[0];
+    await writeFile(filePath, `${firstLine}\n`, 'utf8');
     await withIsolatedDatabase(async () => {
       sessionsDb.createAppSession('app-1', 'claude', '/workspace/demo', 'Started in CloudCLI');
       sessionsDb.assignProviderSessionId('app-1', SESSION_ID);

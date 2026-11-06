@@ -3,7 +3,7 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 
 import { sessionsDb } from '@/modules/database/index.js';
-import { readLatestCustomTitle } from '@/modules/providers/list/claude/claude-session-title.provider.js';
+import { readClaudeShownTitle } from '@/modules/providers/list/claude/claude-session-title.provider.js';
 import {
   buildLookupMap,
   extractFirstValidJsonlData,
@@ -18,9 +18,10 @@ type ParsedSession = {
   projectPath: string;
   sessionName?: string;
   /**
-   * True when the name came from a rename (`/rename` in Claude, or CloudCLI
-   * writing the same line). Such a name replaces whatever the row holds,
-   * including the name a CloudCLI-created session started with.
+   * True when the name is the one Claude Code shows (a `/rename`, which
+   * CloudCLI also writes, or Claude's generated title). Such a name replaces
+   * whatever the row holds, including the name a CloudCLI-created session
+   * started with.
    */
   isExplicitName?: boolean;
 };
@@ -110,8 +111,8 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
       filePath
     );
 
-    // `createSession` keeps the name of a session CloudCLI created, so a rename
-    // made in the CLI has to be applied to that row explicitly.
+    // `createSession` keeps the name of a session CloudCLI created, so Claude's
+    // title has to be applied to that row explicitly.
     if (parsed.isExplicitName && parsed.sessionName
       && sessionsDb.getSessionById(rowId)?.custom_name !== parsed.sessionName) {
       sessionsDb.updateSessionCustomName(rowId, parsed.sessionName);
@@ -146,13 +147,14 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
       return null;
     }
 
-    // A rename wins over the stored name: renames made in the CLI reach
-    // CloudCLI, and CloudCLI's own renames are written as the same line.
-    const renamedTo = await readLatestCustomTitle(filePath, parsed.sessionId);
-    if (renamedTo) {
+    // The title Claude Code shows wins over the stored name, so both apps name
+    // a session the same. CloudCLI's own renames are written into the
+    // transcript as a `/rename` line, so they are part of that title.
+    const claudeTitle = await readClaudeShownTitle(filePath, parsed.sessionId);
+    if (claudeTitle) {
       return {
         ...parsed,
-        sessionName: normalizeSessionName(renamedTo, 'Untitled Claude Session'),
+        sessionName: normalizeSessionName(claudeTitle, 'Untitled Claude Session'),
         isExplicitName: true,
       };
     }
