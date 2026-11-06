@@ -354,10 +354,9 @@ test('readTextFile rejects traversal before invoking the filesystem adapter', as
 test('readTextFile reports a directory as a client error, not a 500', async () => {
   const projectRoot = path.resolve('file-tree-test-project');
   const fileSystem = createFakeFileSystem({
+    stat: async () => createStats(true, 0o755),
     readTextFile: async () => {
-      const error = new Error('EISDIR: illegal operation on a directory, read');
-      (error as NodeJS.ErrnoException).code = 'EISDIR';
-      throw error;
+      throw new Error('a directory must not be read');
     },
   });
   const service = createFileTreeService(createDependencies(fileSystem, projectRoot));
@@ -368,6 +367,53 @@ test('readTextFile reports a directory as a client error, not a 500', async () =
       && error.code === 'EISDIR'
       && error.statusCode === 400
       && error.message === 'Path is a directory, not a file',
+  );
+});
+
+test('readTextFile refuses a file over 5 MB without reading it', async () => {
+  const projectRoot = path.resolve('file-tree-test-project');
+  const readPaths: string[] = [];
+  const statsOfSize = (size: number): FileTreeStats => ({ ...createStats(false, 0o644), size });
+  let fileSize = 12.5 * 1024 * 1024;
+  const fileSystem = createFakeFileSystem({
+    stat: async () => statsOfSize(fileSize),
+    readTextFile: async (filePath) => {
+      readPaths.push(filePath);
+      return 'small enough';
+    },
+  });
+  const service = createFileTreeService(createDependencies(fileSystem, projectRoot));
+
+  await assert.rejects(
+    service.readTextFile('project-1', 'huge.log'),
+    (error: unknown) => error instanceof AppError
+      && error.code === 'FILE_TOO_LARGE'
+      && error.statusCode === 413
+      && error.message === 'File is too large to open in the editor (12.5 MB; the limit is 5 MB).',
+  );
+  fileSize = 5 * 1024 * 1024 + 1;
+  await assert.rejects(
+    service.readTextFile('project-1', 'huge.log'),
+    (error: unknown) => error instanceof AppError && error.code === 'FILE_TOO_LARGE',
+  );
+  assert.deepEqual(readPaths, []);
+
+  fileSize = 5 * 1024 * 1024;
+  assert.equal((await service.readTextFile('project-1', 'huge.log')).content, 'small enough');
+});
+
+test('readTextFile maps a missing file to 404 at the size check', async () => {
+  const projectRoot = path.resolve('file-tree-test-project');
+  const fileSystem = createFakeFileSystem({
+    stat: async () => {
+      throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+    },
+  });
+  const service = createFileTreeService(createDependencies(fileSystem, projectRoot));
+
+  await assert.rejects(
+    service.readTextFile('project-1', 'gone.txt'),
+    (error: unknown) => error instanceof AppError && error.statusCode === 404 && error.message === 'File not found',
   );
 });
 
@@ -396,6 +442,59 @@ test('createEntry performs filesystem mutation only through the injected adapter
 
   assert.equal(result.path, targetPath);
   assert.deepEqual(writtenFiles, [{ filePath: targetPath, content: '' }]);
+});
+
+function createRecordingWriteService(projectRoot: string) {
+  const writtenPaths: string[] = [];
+  const fileSystem = createFakeFileSystem({
+    writeTextFile: async (filePath) => {
+      writtenPaths.push(filePath);
+    },
+  });
+  return { service: createFileTreeService(createDependencies(fileSystem, projectRoot)), writtenPaths };
+}
+
+const isOutsideProjectError = (error: unknown) => error instanceof AppError
+  && error.code === 'PATH_OUTSIDE_PROJECT'
+  && error.statusCode === 403;
+
+test('a project at a drive or filesystem root accepts the files under it', async () => {
+  const filesystemRoot = path.parse(process.cwd()).root;
+  const { service, writtenPaths } = createRecordingWriteService(filesystemRoot);
+
+  await service.saveTextFile('project-1', path.join(filesystemRoot, 'notes.txt'), 'x');
+  await service.saveTextFile('project-1', path.join('docs', 'guide.md'), 'x');
+
+  assert.deepEqual(writtenPaths, [
+    path.join(filesystemRoot, 'notes.txt'),
+    path.join(filesystemRoot, 'docs', 'guide.md'),
+  ]);
+  await assert.rejects(service.saveTextFile('project-1', filesystemRoot, 'x'), isOutsideProjectError);
+});
+
+test('the drive letter case does not matter on Windows, and traversal is still refused', async (t) => {
+  if (process.platform !== 'win32') {
+    t.skip('drive letters only exist on Windows');
+    return;
+  }
+  // Project roots are stored as `D:\…`; VS Code transcripts quote `d:\…`.
+  const projectRoot = path.resolve('file-tree-test-project');
+  const lowerCaseDrivePath = path.join(projectRoot[0].toLowerCase() + projectRoot.slice(1), 'src', 'a.ts');
+  const { service, writtenPaths } = createRecordingWriteService(projectRoot);
+
+  await service.saveTextFile('project-1', lowerCaseDrivePath, 'x');
+  assert.deepEqual(writtenPaths, [lowerCaseDrivePath]);
+
+  const otherDrive = projectRoot[0].toUpperCase() === 'Z' ? 'Y:\\' : 'Z:\\';
+  for (const outsidePath of [
+    path.join('..', 'secret.txt'),
+    path.join(projectRoot, '..', 'secret.txt'),
+    `${projectRoot}-sibling\\secret.txt`,
+    path.join(otherDrive, path.relative(path.parse(projectRoot).root, projectRoot), 'a.ts'),
+  ]) {
+    await assert.rejects(service.saveTextFile('project-1', outsidePath, 'x'), isOutsideProjectError, outsidePath);
+  }
+  assert.equal(writtenPaths.length, 1);
 });
 
 /**

@@ -43,6 +43,14 @@ const COMMON_WORKSPACE_DIRECTORY_NAMES = [
 // server heap before the browser has a chance to switch to a narrower project.
 const MAXIMUM_FILE_TREE_ENTRIES = 10_000;
 
+// Largest file the text viewer/editor endpoint reads. Downloads and media
+// previews stream through `openFile` and are not limited by this.
+const MAXIMUM_TEXT_FILE_BYTES = 5 * 1024 * 1024;
+
+function formatMegabytes(bytes: number): string {
+  return (bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, '');
+}
+
 type FileTreeEntryFilter = (entryPath: string, isDirectory: boolean) => boolean;
 
 function includeEntryByHardExclusions(entryPath: string, isDirectory: boolean): boolean {
@@ -97,9 +105,16 @@ function resolvePathInsideProject(projectRoot: string, targetPath: string): stri
   const resolvedPath = path.isAbsolute(targetPath)
     ? path.resolve(targetPath)
     : path.resolve(projectRoot, targetPath);
-  const normalizedProjectRoot = path.resolve(projectRoot) + path.sep;
+  // `path.relative` compares case-insensitively on win32, where VS Code writes
+  // `d:\` for a root stored as `D:\`, and handles a drive-root project. It
+  // returns an absolute path for another drive and starts with `..` outside.
+  const relativePath = path.relative(path.resolve(projectRoot), resolvedPath);
+  const isInsideProject = relativePath !== ''
+    && relativePath !== '..'
+    && !relativePath.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relativePath);
 
-  if (!resolvedPath.startsWith(normalizedProjectRoot)) {
+  if (!isInsideProject) {
     throw createFileTreeError('Path must be under project root', 403, 'PATH_OUTSIDE_PROJECT');
   }
 
@@ -465,15 +480,30 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
     async readTextFile(projectId, filePath) {
       const projectRoot = await resolveProjectRoot(projectId);
       const resolvedPath = await resolveReadablePath(projectRoot, filePath);
+      const fileErrors = {
+        ENOENT: { message: 'File not found', statusCode: 404 },
+        EACCES: { message: 'Permission denied', statusCode: 403 },
+        EISDIR: { message: 'Path is a directory, not a file', statusCode: 400 },
+      };
       try {
+        // Checked before reading: the whole file is held in memory and sent
+        // as one JSON string, which a multi-GB log would exhaust.
+        const stats = await fileSystem.stat(resolvedPath);
+        if (stats.isDirectory()) {
+          throw createFileTreeError(fileErrors.EISDIR.message, fileErrors.EISDIR.statusCode, 'EISDIR');
+        }
+        if (stats.size > MAXIMUM_TEXT_FILE_BYTES) {
+          throw createFileTreeError(
+            `File is too large to open in the editor (${formatMegabytes(stats.size)} MB; the limit is ${formatMegabytes(MAXIMUM_TEXT_FILE_BYTES)} MB).`,
+            413,
+            'FILE_TOO_LARGE',
+          );
+        }
         const content = await fileSystem.readTextFile(resolvedPath);
         return { content, path: resolvedPath };
       } catch (error) {
-        mapFileSystemError(error, {
-          ENOENT: { message: 'File not found', statusCode: 404 },
-          EACCES: { message: 'Permission denied', statusCode: 403 },
-          EISDIR: { message: 'Path is a directory, not a file', statusCode: 400 },
-        });
+        if (error instanceof AppError) throw error;
+        mapFileSystemError(error, fileErrors);
       }
     },
 

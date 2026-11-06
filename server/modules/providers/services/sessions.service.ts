@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
-import { broadcastSessionUpserted, chatRunRegistry } from '@/modules/websocket/index.js';
+import { broadcastSessionsRemoved, broadcastSessionUpserted, chatRunRegistry } from '@/modules/websocket/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import { listBusyClaudeCliSessions } from '@/modules/providers/services/claude-cli-liveness.service.js';
 import { eraseSessionFromProvider } from '@/modules/providers/services/session-deletion.service.js';
@@ -71,9 +71,7 @@ type RecentSessionListItem = Pick<
 type StaleSessionListItem = Pick<
   ArchivedSessionListItem,
   'sessionId' | 'provider' | 'projectId' | 'projectPath' | 'projectDisplayName' | 'sessionTitle' | 'lastActivity'
-> & {
-  isArchived: boolean;
-};
+>;
 
 type RecentSessionsPage = {
   conversations: RecentSessionListItem[];
@@ -723,6 +721,10 @@ export const sessionsService = {
       });
     }
 
+    // The row is gone before the watcher sees the transcript go, so its removal
+    // check finds nothing to report; the other open clients learn of it here.
+    broadcastSessionsRemoved([sessionId], []);
+
     return {
       sessionId,
       action: 'deleted',
@@ -732,9 +734,8 @@ export const sessionsService = {
 
   /**
    * Sessions with no activity for at least `olderThanDays` days, for the
-   * "clean up old sessions" view. Archived sessions are included (they are the
-   * usual candidates); sessions in starred projects and sessions that are
-   * running now are left out.
+   * "clean up old sessions" view. Sessions in starred projects and sessions
+   * that are running now are left out.
    */
   async listStaleSessions(olderThanDays: number, now = Date.now()): Promise<StaleSessionListItem[]> {
     const cutoff = new Date(now - olderThanDays * 24 * 60 * 60 * 1000).toISOString();
@@ -767,7 +768,6 @@ export const sessionsService = {
         projectDisplayName: resolveProjectDisplayName(projectPath, project?.custom_project_name),
         sessionTitle: session.custom_name?.trim() || session.session_id,
         lastActivity: session.updated_at ?? session.created_at ?? null,
-        isArchived: Boolean(session.isArchived),
       });
     }
 

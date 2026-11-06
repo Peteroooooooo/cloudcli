@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 
+import express from 'express';
+
+import { createSystemRouter } from '../system.routes.js';
 import { createSystemUpdateService } from '../system.service.js';
 
 type SystemUpdateDependencies = Parameters<typeof createSystemUpdateService>[0];
@@ -11,7 +17,7 @@ function createDependencies(
   return {
     appRoot: '/app/cloudcli',
     homeDirectory: '/home/cloudcli',
-    installMode: 'git',
+    installMode: 'npm',
     isPlatform: false,
     environment: { TEST_ENVIRONMENT: 'true' },
     runShellCommand: async () => ({ exitCode: 0, output: 'updated', errorOutput: '' }),
@@ -21,28 +27,56 @@ function createDependencies(
   };
 }
 
-test('git installations update from the application root', async () => {
+// The old git workflow ran `git checkout main && git pull && npm install` in
+// the checkout without rebuilding, which left the running app and the files
+// on disk out of step.
+test('git installations refuse the in-app update and run nothing', async () => {
   const calls: unknown[][] = [];
-  const dependencies = createDependencies({
-    runShellCommand: async (command, workingDirectory, environment) => {
-      calls.push([command, workingDirectory, environment]);
-      return { exitCode: 0, output: 'git update complete', errorOutput: '' };
+  const service = createSystemUpdateService(createDependencies({
+    installMode: 'git',
+    runShellCommand: async (...args) => {
+      calls.push(args);
+      return { exitCode: 0, output: '', errorOutput: '' };
     },
-  });
-  const service = createSystemUpdateService(dependencies);
+  }));
 
   const result = await service.updateSystem();
 
-  assert.deepEqual(calls, [[
-    'git checkout main && git pull && npm install',
-    '/app/cloudcli',
-    dependencies.environment,
-  ]]);
-  assert.deepEqual(result, {
-    success: true,
-    output: 'git update complete',
-    message: 'Update completed. Please restart the server to apply changes.',
-  });
+  assert.deepEqual(calls, []);
+  assert.equal(result.success, false);
+  assert.ok('refused' in result && result.refused);
+  assert.match('error' in result ? result.error : '', /disabled for git installs/);
+});
+
+test('the update endpoint answers 409 for a git installation', async () => {
+  const app = express();
+  app.use('/api/system', createSystemRouter(createSystemUpdateService(createDependencies({
+    installMode: 'git',
+    runShellCommand: async () => {
+      throw new Error('must not run');
+    },
+  }))));
+  const server = app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+
+  try {
+    const { port } = server.address() as AddressInfo;
+    const { statusCode, body } = await new Promise<{ statusCode?: number; body: string }>((resolve, reject) => {
+      const request = http.request({ host: '127.0.0.1', port, path: '/api/system/update', method: 'POST', agent: false }, (response) => {
+        let data = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk: string) => { data += chunk; });
+        response.on('end', () => resolve({ statusCode: response.statusCode, body: data }));
+      });
+      request.on('error', reject);
+      request.end();
+    });
+
+    assert.equal(statusCode, 409);
+    assert.match((JSON.parse(body) as { error: string }).error, /disabled for git installs/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
 
 test('global npm installations update from the user home directory', async () => {

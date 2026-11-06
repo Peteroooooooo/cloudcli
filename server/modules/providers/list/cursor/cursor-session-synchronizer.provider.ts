@@ -47,7 +47,9 @@ export class CursorSessionSynchronizer implements IProviderSessionSynchronizer {
 
     let processed = 0;
 
-    const files = await findFilesRecursivelyChangedAfter(projectsDir, '.jsonl', since ?? null);
+    const files = await findFilesRecursivelyChangedAfter(projectsDir, '.jsonl', since ?? null, {
+      indexedPaths: sessionsDb.getTranscriptPathsByProvider(this.provider),
+    });
 
     for (const filePath of files) {
       const parsed = await this.processSessionFile(filePath);

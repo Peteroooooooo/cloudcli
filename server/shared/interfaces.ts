@@ -47,6 +47,12 @@ export interface IProviderRuntime {
    */
   listBackgroundWork?(): Array<{ sessionId: string; tasks: BackgroundTaskSummary[] }>;
   /**
+   * Whether the runtime holds the session's process open past its turn. Covers
+   * holds that `listBackgroundWork` cannot show because the tools that caused
+   * them report no tasks.
+   */
+  isHoldingSession?(sessionId: string): boolean;
+  /**
    * Stops one outstanding background task. Resolves false when the session has
    * no live process or that process is not tracking the task — it already
    * settled, or the id was never one of its own.

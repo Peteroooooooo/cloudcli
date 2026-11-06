@@ -67,36 +67,33 @@ export const scheduledMessagesDb = {
       .all(userId) as ScheduledMessageRow[];
   },
 
+  /** Every message whose time has passed and that has not been sent yet, oldest first. */
+  listDue(now: Date): ScheduledMessageRow[] {
+    return getConnection()
+      .prepare(
+        `SELECT ${COLUMNS} FROM scheduled_messages
+         WHERE status = 'pending' AND scheduled_for <= ?
+         ORDER BY scheduled_for ASC`
+      )
+      .all(now.toISOString()) as ScheduledMessageRow[];
+  },
+
   /**
-   * Claims every message whose time has passed, marking them in the same
-   * statement that selects them.
+   * Claims one due message for sending, marking it sent in the same statement
+   * that checks it is still pending.
    *
-   * Claiming is what makes a missed schedule work: the server can be down at
-   * the moment a message was due, and the next poll after it starts picks the
-   * message up instead of skipping it. Doing it in one transaction is what
-   * stops two overlapping polls from sending the same message twice.
+   * Claimed one at a time, right before its turn starts, so a restart part-way
+   * through a pass leaves the messages not yet started pending for the next
+   * one. The conditional update is what stops two overlapping passes from
+   * sending the same message twice: only one of them sees a row change.
    */
-  claimDue(now: Date): ScheduledMessageRow[] {
-    const db = getConnection();
-    const nowIso = now.toISOString();
-
-    return db.transaction(() => {
-      const due = db
-        .prepare(
-          `SELECT ${COLUMNS} FROM scheduled_messages
-           WHERE status = 'pending' AND scheduled_for <= ?
-           ORDER BY scheduled_for ASC`
-        )
-        .all(nowIso) as ScheduledMessageRow[];
-
-      for (const row of due) {
-        db.prepare(
-          `UPDATE scheduled_messages SET status = 'sent', updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-        ).run(row.id);
-      }
-
-      return due;
-    })();
+  claim(id: string): boolean {
+    return getConnection()
+      .prepare(
+        `UPDATE scheduled_messages SET status = 'sent', updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND status = 'pending'`
+      )
+      .run(id).changes > 0;
   },
 
   markFailed(id: string, reason: string): void {

@@ -136,3 +136,16 @@ test('routes permission decisions through provider-owned runtime capabilities', 
     { requestId: 'request-1', sessionId: 'session-1' },
   ]);
 });
+
+test('a session counts as busy while its process is held, even with no task to show', () => {
+  const service = createService([
+    createProvider('claude', createRuntime({
+      listBackgroundWork: () => [],
+      isHoldingSession: (sessionId) => sessionId === 'held-session',
+    })),
+    createProvider('cursor', createRuntime()),
+  ]);
+
+  assert.equal(service.hasBackgroundWork('held-session'), true);
+  assert.equal(service.hasBackgroundWork('idle-session'), false);
+});

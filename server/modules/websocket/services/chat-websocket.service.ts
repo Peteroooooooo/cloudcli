@@ -19,7 +19,7 @@ import type {
   ProviderPermissionDecision,
   ProviderRuntimeWriter,
 } from '@/shared/types.js';
-import { parseIncomingJsonObject } from '@/shared/utils.js';
+import { createCompleteMessage, parseIncomingJsonObject } from '@/shared/utils.js';
 
 /**
  * Trust boundary for client-supplied image attachments: chat.send options come
@@ -219,6 +219,8 @@ async function dispatchRun(
   dependencies: ChatWebSocketDependencies,
   extraRuntimeOptions: AnyRecord = {},
   beforeRun?: (run: NonNullable<ReturnType<typeof chatRunRegistry.startRun>>) => void | Promise<void>,
+  /** Called once the provider runtime has been handed the turn. */
+  onStarted?: () => void,
 ): Promise<{ started: boolean; error: string | null }> {
   const provider = session.provider as LLMProvider;
 
@@ -282,6 +284,9 @@ async function dispatchRun(
     sessionId,
     cwd: clientOptions.cwd ?? session.project_path ?? undefined,
     projectPath: session.project_path ?? clientOptions.projectPath,
+    // Aborted by `chat.abort`. Runtimes check it before they create their
+    // query or thread, which is the window their own abort cannot reach.
+    stopSignal: run.stopController.signal,
   };
 
   let failure: string | null = null;
@@ -291,7 +296,13 @@ async function dispatchRun(
     // be taken back. Inside the try so a rewind that throws still releases the
     // run instead of leaving the session processing forever.
     await beforeRun?.(run);
-    await dependencies.runtime.run(provider, command, runtimeOptions, run.writer);
+    // A stop that arrived during the rewind, or an interrupt that already
+    // ended this run, means the turn must not start at all.
+    if (!run.stopController.signal.aborted && run.status === 'running') {
+      const execution = dependencies.runtime.run(provider, command, runtimeOptions, run.writer);
+      onStarted?.();
+      await execution;
+    }
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
     console.error(`[Chat] Provider runtime "${provider}" failed`, { sessionId, error: failure });
@@ -301,7 +312,12 @@ async function dispatchRun(
     // "processing" forever on every connected client. Scoped to THIS run —
     // a queued message can start the session's next run before this promise
     // settles, and the session-keyed completeRun would kill that new run.
-    chatRunRegistry.completeRunIfCurrent(run, { exitCode: 1 });
+    // A runtime that saw the stop signal ends without a `complete` of its
+    // own, so the stop is what gets reported.
+    chatRunRegistry.completeRunIfCurrent(
+      run,
+      run.stopController.signal.aborted ? { exitCode: 0, aborted: true } : { exitCode: 1 },
+    );
   }
 
   return { started: true, error: failure };
@@ -429,19 +445,38 @@ async function handleChatAbort(
   }
 
   const run = chatRunRegistry.getRun(sessionId);
-  if (!run || run.status !== 'running') {
-    sendProtocolError(ws, 'NO_ACTIVE_RUN', `Session "${sessionId}" has no active run.`, sessionId);
+  if (run && run.status === 'running') {
+    chatRunRegistry.requestStop(run);
+    const stopped = await dependencies.runtime.abort(run.provider, sessionId);
+
+    // Nothing to interrupt yet means the runtime is still setting up. It reads
+    // the stop signal before it starts the turn, and the run's dispatch then
+    // reports the stop; reporting it here would show a turn as stopped that
+    // goes on to run. Scoped to the run that was stopped: a stop can take a
+    // round trip, and a new run of the session may have started meanwhile.
+    if (stopped) {
+      chatRunRegistry.completeRunIfCurrent(run, { exitCode: 0, aborted: true });
+    }
     return;
   }
 
-  const success = await dependencies.runtime.abort(run.provider, sessionId);
+  // The run completed, but the CLI is still going: background work it was
+  // held open for, or a turn it pushed on its own once that work reported.
+  // Only the runtime can stop that, and the run's watchers have to hear it.
+  const provider = run?.provider ?? (sessionsDb.getSessionById(sessionId)?.provider as LLMProvider | undefined);
+  if (
+    provider
+    && dependencies.runtime.hasBackgroundWork(sessionId)
+    && await dependencies.runtime.abort(provider, sessionId)
+  ) {
+    chatRunRegistry.attachConnection(sessionId, ws);
+    if (!chatRunRegistry.announceStoppedAfterComplete(sessionId)) {
+      sendJson(ws, createCompleteMessage({ provider, sessionId, exitCode: 0, aborted: true }));
+    }
+    return;
+  }
 
-  // Scoped to the run that was stopped: a stop can take a round trip, and a
-  // new run of the session may have started by the time it returns.
-  chatRunRegistry.completeRunIfCurrent(run, {
-    exitCode: success ? 0 : 1,
-    aborted: true,
-  });
+  sendProtocolError(ws, 'NO_ACTIVE_RUN', `Session "${sessionId}" has no active run.`, sessionId);
 }
 
 /**
@@ -506,6 +541,7 @@ function handleChatSubscribe(
   dependencies: ChatWebSocketDependencies
 ): void {
   const targets = Array.isArray(data.sessions) ? data.sessions : [];
+  const viewedSessionIds: string[] = [];
 
   for (const target of targets) {
     if (!target || typeof target !== 'object') {
@@ -518,14 +554,20 @@ function handleChatSubscribe(
     if (!sessionId) {
       continue;
     }
-
-    const lastSeqRaw = (target as AnyRecord).lastSeq;
-    const lastSeq = typeof lastSeqRaw === 'number' && Number.isFinite(lastSeqRaw)
-      ? Math.max(0, Math.floor(lastSeqRaw))
-      : 0;
+    viewedSessionIds.push(sessionId);
 
     const run = chatRunRegistry.getRun(sessionId);
     const isProcessing = chatRunRegistry.isProcessing(sessionId);
+
+    // A `lastSeq` counts events of one run. Sent with a different run's id it
+    // says nothing about this run, which the client then has not seen at all.
+    const lastSeqRaw = (target as AnyRecord).lastSeq;
+    const clientRunId = (target as AnyRecord).runId;
+    const lastSeq = typeof lastSeqRaw === 'number'
+      && Number.isFinite(lastSeqRaw)
+      && !(typeof clientRunId === 'string' && clientRunId !== run?.runId)
+      ? Math.max(0, Math.floor(lastSeqRaw))
+      : 0;
 
     // Future live events for this run should land on the socket that asked —
     // this is what makes mid-stream page refreshes work for all providers.
@@ -545,6 +587,7 @@ function handleChatSubscribe(
       kind: 'chat_subscribed',
       sessionId,
       isProcessing,
+      runId: run?.runId ?? null,
       lastSeq: run?.lastSeq ?? 0,
       pendingPermissions,
       timestamp: new Date().toISOString(),
@@ -560,6 +603,10 @@ function handleChatSubscribe(
       }
     }
   }
+
+  // Runs that start later for these sessions — a queued or scheduled turn
+  // that no socket asked for — stream to this socket too.
+  chatRunRegistry.setViewedSessions(ws, viewedSessionIds);
 }
 
 /**
@@ -580,6 +627,8 @@ function handlePermissionResponse(data: AnyRecord, dependencies: ChatWebSocketDe
   });
 }
 
+type DetachedTurnOutcome = { started: boolean; error: string | null };
+
 /**
  * Handles authenticated chat websocket messages used by the main chat panel.
  *
@@ -587,7 +636,7 @@ function handlePermissionResponse(data: AnyRecord, dependencies: ChatWebSocketDe
  * - `chat.send`                { sessionId, content, options? }
  * - `chat.abort`               { sessionId }
  * - `chat.stop-task`           { sessionId, taskId }
- * - `chat.subscribe`           { sessions: [{ sessionId, lastSeq? }] }
+ * - `chat.subscribe`           { sessions: [{ sessionId, lastSeq?, runId? }] }
  * - `chat.permission-response` { requestId, allow, updatedInput?, message?, rememberEntry? }
  *
  * Outbound protocol (server to client): every frame is `kind`-based — either
@@ -598,15 +647,17 @@ function handlePermissionResponse(data: AnyRecord, dependencies: ChatWebSocketDe
 /**
  * Runs a turn for a session with no client attached.
  *
- * Used by scheduled messages, which fire from a timer: there is no socket to
- * report errors to and no audience to stream to. The run is registered exactly
- * like an interactive one, so anyone who opens the session while it is going
- * subscribes and replays it from the start, and the session shows as busy
- * everywhere in the meantime.
+ * Used by scheduled and queued messages, which fire from the server: there is
+ * no socket to report errors to. The run is registered exactly like an
+ * interactive one, streams to every tab viewing the session, and anyone who
+ * opens the session while it is going subscribes and replays it from the
+ * start; the session shows as busy everywhere in the meantime.
  *
- * Resolves when the provider run settles. Returns false when the session has
- * gone away or is busy without `interruptActiveRun`, which the caller reports
- * on the schedule.
+ * Resolves once the provider runtime has the turn, not when the turn ends, so
+ * a caller sending to several sessions is not held up by one long turn;
+ * `finished` settles with the run. Returns `started: false` when the session
+ * has gone away or is busy without `interruptActiveRun`, which the caller
+ * reports on the schedule.
  */
 export async function runDetachedChatTurn(
   input: {
@@ -622,7 +673,7 @@ export async function runDetachedChatTurn(
     interruptActiveRun?: boolean;
   },
   dependencies: ChatWebSocketDependencies,
-): Promise<{ started: boolean; error: string | null }> {
+): Promise<DetachedTurnOutcome & { finished?: Promise<DetachedTurnOutcome> }> {
   const session = sessionsDb.getSessionById(input.sessionId);
   if (!session) {
     return { started: false, error: 'The session no longer exists.' };
@@ -642,7 +693,9 @@ export async function runDetachedChatTurn(
     // terminal `complete` on its behalf, so every watching client sees the
     // interrupted run end before this turn's stream begins. The interrupted
     // run's own dispatch settles later through completeRunIfCurrent, which is
-    // scoped to that run and cannot touch the one started here.
+    // scoped to that run and cannot touch the one started here. The stop
+    // signal keeps a run still setting up from starting its turn after all.
+    chatRunRegistry.requestStop(activeRun);
     const aborted = await dependencies.runtime.abort(activeRun.provider, input.sessionId);
     chatRunRegistry.completeRunIfCurrent(activeRun, {
       exitCode: aborted ? 0 : 1,
@@ -650,14 +703,26 @@ export async function runDetachedChatTurn(
     });
   }
 
-  return dispatchRun(
+  let markStarted: () => void = () => {};
+  const started = new Promise<null>((resolve) => {
+    markStarted = () => resolve(null);
+  });
+  const finished = dispatchRun(
     null,
     input.userId,
     input.sessionId,
     session,
     { sessionId: input.sessionId, content: input.content, options: input.options ?? {} },
     dependencies,
+    {},
+    undefined,
+    markStarted,
   );
+
+  // A run that never reached the runtime (refused, or failed on the way) is
+  // already its own answer.
+  const settledEarly = await Promise.race([started, finished]);
+  return settledEarly ?? { started: true, error: null, finished };
 }
 
 export function handleChatConnection(
@@ -713,5 +778,6 @@ export function handleChatConnection(
   ws.on('close', () => {
     console.log('[INFO] Chat client disconnected');
     connectedClients.delete(ws);
+    chatRunRegistry.forgetConnection(ws);
   });
 }

@@ -121,10 +121,6 @@
     "createProjectError": "Při vytváření projektu došlo k chybě. Zkuste to prosím znovu.",
     "updateProjectError": "Při aktualizaci projektu došlo k chybě. Zkuste to prosím znovu.",
     "refreshError": "Nepodařilo se obnovit. Zkuste to prosím znovu.",
-    "restoreProjectFailed": "Nepodařilo se obnovit projekt. Zkuste to prosím znovu.",
-    "restoreProjectError": "Při obnovování projektu došlo k chybě. Zkuste to prosím znovu.",
-    "restoreSessionFailed": "Nepodařilo se obnovit relaci. Zkuste to prosím znovu.",
-    "restoreSessionError": "Při obnovování relace došlo k chybě. Zkuste to prosím znovu.",
     "forkSessionError": "Tuto relaci se nepodařilo forknout. Zkuste to prosím znovu."
   },
   "version": {
@@ -136,10 +132,8 @@
     "modeConversations": "Konverzace",
     "modeMore": "Další",
     "runningTooltip": "Běžící relace",
-    "archiveOnlyTooltip": "Pouze archiv",
     "conversationsPlaceholder": "Hledat v konverzacích...",
     "runningPlaceholder": "Hledat v běžících relacích...",
-    "archivedPlaceholder": "Hledat v archivovaných relacích...",
     "searching": "Hledání...",
     "sessionTitles": "Relace",
     "conversationContents": "Obsah konverzací",
@@ -168,20 +162,6 @@
     "emptyDescription": "Aktivní práce se zobrazí zde, zatímco provider zpracovává požadavek.",
     "noMatchingSessions": "Hledání neodpovídá žádná běžící relace."
   },
-  "archived": {
-    "title": "Archiv",
-    "restoreHint": "Položky můžete kdykoli obnovit",
-    "loadingTitle": "Načítání archivu...",
-    "loadingDescription": "Načítají se skryté pracovní prostory a relace, které můžete později obnovit.",
-    "emptyTitle": "Žádné archivované položky",
-    "emptyDescription": "Archivované pracovní prostory a relace se zobrazí zde, jakmile je skryjete ze seznamu aktivních.",
-    "noMatchingSessions": "Žádné odpovídající archivované položky",
-    "tryDifferentSearch": "Zkuste jiný hledaný výraz.",
-    "restoreAction": "Obnovit",
-    "restoreProject": "Obnovit pracovní prostor",
-    "restore": "Obnovit relaci",
-    "deletePermanently": "Trvale smazat"
-  },
   "deleteConfirmation": {
     "deleteProject": "Odstranit projekt",
     "deleteSession": "Smazat relaci",
@@ -191,10 +171,6 @@
     "sessionCount_many": "Tento projekt obsahuje {{count}} konverzace.",
     "sessionCount_other": "Tento projekt obsahuje {{count}} konverzací.",
     "removeFromSidebar": "Odstranit pouze z postranního panelu",
-    "archiveProject": "Archivovat projekt",
-    "archiveSession": "Archivovat relaci",
-    "archiveSessionNotice": "Archivace skryje relaci ze seznamu aktivních a zachová její historii.",
-    "archivedSessionNotice": "Tato relace je již archivovaná. Můžete ji nechat skrytou, nebo ji trvale smazat.",
     "deleteSessionPermanently": "Trvale smazat",
     "deleteAllData": "Trvale smazat všechna data",
     "allConversationsDeleted": "Projekt bude odstraněn z postranního panelu. Vaše soubory, paměť a data relací zůstanou zachovány.",

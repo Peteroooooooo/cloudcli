@@ -137,3 +137,16 @@ test('a root that does not exist does not stop later roots from matching', async
 test('traversal out of the temp directory does not resolve', async () => {
   assert.equal(await resolveReadOnlyRootPath(`${os.tmpdir()}/../etc/passwd`), null);
 });
+
+test('a root that is a whole drive or filesystem root contains the paths on it', async () => {
+  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'read-only-root-'));
+
+  try {
+    const filesystemRoot = path.parse(temporaryDirectory).root;
+    const resolved = await resolvePathUnderRoots(temporaryDirectory, [filesystemRoot]);
+    assert.ok(resolved);
+    assert.equal(path.relative(await realpath(temporaryDirectory), resolved), '');
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});

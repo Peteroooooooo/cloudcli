@@ -18,8 +18,6 @@ const recentConversationsResponse = vi.fn();
 vi.mock('@/shared/api', () => ({
   api: {
     recentConversations: () => recentConversationsResponse(),
-    archivedProjects: () => Promise.resolve({ ok: true, json: async () => ({ data: { projects: [] } }) }),
-    getArchivedSessions: () => Promise.resolve({ ok: true, json: async () => ({ data: { sessions: [] } }) }),
   },
 }));
 
@@ -52,6 +50,7 @@ const renderController = (initialProjects: Project[]) => renderHook(
     selectedProject: null,
     selectedSession: null,
     activeSessions: new Set<string>(),
+    backgroundSessionIds: new Set<string>(),
     isLoading: false,
     isMobile: false,
     t,

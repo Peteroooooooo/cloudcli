@@ -20,6 +20,7 @@ import { useChatProviderState } from '@/modules/chat/hooks/useChatProviderState'
 import { useScheduledMessages } from '@/modules/chat/composer/useScheduledMessages';
 import { useChatSessionState } from '@/modules/chat/hooks/useChatSessionState';
 import { useChatRealtimeHandlers } from '@/modules/chat/hooks/useChatRealtimeHandlers';
+import type { LiveSeqCursor } from '@/modules/chat/hooks/useChatRealtimeHandlers';
 import { useChatComposerState } from '@/modules/chat/hooks/useChatComposerState';
 import { useSessionStore } from '@/modules/chat/hooks/useSessionStore';
 import {
@@ -88,10 +89,10 @@ function ChatInterface({
   // When each session's `chat.subscribe` was last sent; idle acks older than
   // a later local request are discarded as stale.
   const statusCheckSentAtRef = useRef(new Map<string, number>());
-  // Highest live `seq` observed per session. Written by the realtime handler
-  // on every sequenced frame, read whenever a `chat.subscribe` is sent so the
+  // Live-stream position per session. Written by the realtime handler on
+  // every sequenced frame, read whenever a `chat.subscribe` is sent so the
   // server replays only the events this client actually missed.
-  const lastSeqRef = useRef(new Map<string, number>());
+  const lastSeqRef = useRef(new Map<string, LiveSeqCursor>());
 
   const resetStreamingState = useCallback(() => {
     if (streamTimerRef.current) {
@@ -265,21 +266,13 @@ function ChatInterface({
   });
 
   // On WebSocket reconnect, request a bounded persisted-tail sync (deferred
-  // while Chat is hidden), then re-subscribe — the
-  // `chat_subscribed` ack restores or clears the activity indicator, replays
-  // missed live events, and re-attaches a still-running stream to this socket.
+  // while Chat is hidden). The re-subscribe is not sent from here: the new
+  // socket re-runs the subscribe effect in useChatSessionState, and a second
+  // subscribe would replay the missed events twice.
   const handleWebSocketReconnect = useCallback(async () => {
     if (!selectedProject || !selectedSession) return;
     await requestLatestMessages(selectedSession.id, isActive);
-    statusCheckSentAtRef.current.set(selectedSession.id, Date.now());
-    sendMessage({
-      type: 'chat.subscribe',
-      sessions: [{
-        sessionId: selectedSession.id,
-        lastSeq: lastSeqRef.current.get(selectedSession.id) ?? 0,
-      }],
-    });
-  }, [isActive, requestLatestMessages, selectedProject, selectedSession, sendMessage]);
+  }, [isActive, requestLatestMessages, selectedProject, selectedSession]);
 
   useChatRealtimeHandlers({
     isActive,

@@ -116,10 +116,6 @@
     "createProjectError": "Terjadi kesalahan saat membuat proyek. Silakan coba lagi.",
     "updateProjectError": "Terjadi kesalahan saat memperbarui proyek. Silakan coba lagi.",
     "refreshError": "Gagal menyegarkan. Silakan coba lagi.",
-    "restoreProjectFailed": "Gagal memulihkan proyek. Silakan coba lagi.",
-    "restoreProjectError": "Terjadi kesalahan saat memulihkan proyek. Silakan coba lagi.",
-    "restoreSessionFailed": "Gagal memulihkan sesi. Silakan coba lagi.",
-    "restoreSessionError": "Terjadi kesalahan saat memulihkan sesi. Silakan coba lagi.",
     "forkSessionError": "Sesi ini tidak dapat di-fork. Silakan coba lagi.",
     "deleteSessionsPartialFailure_one": "{{count}} dari {{total}} sesi gagal dihapus. Silakan coba lagi.",
     "deleteSessionsPartialFailure_other": "{{count}} dari {{total}} sesi gagal dihapus. Silakan coba lagi."
@@ -158,10 +154,6 @@
     "sessionCount_one": "Proyek ini berisi {{count}} percakapan.",
     "sessionCount_other": "Proyek ini berisi {{count}} percakapan.",
     "removeFromSidebar": "Hapus hanya dari sidebar",
-    "archiveProject": "Arsipkan proyek",
-    "archiveSession": "Arsipkan sesi",
-    "archiveSessionNotice": "Pengarsipan menyembunyikan sesi dari daftar aktif tanpa menghapus riwayatnya.",
-    "archivedSessionNotice": "Sesi ini sudah diarsipkan. Sesi dapat tetap disembunyikan atau dihapus permanen.",
     "deleteSessionPermanently": "Hapus permanen",
     "deleteAllData": "Hapus semua data secara permanen",
     "allConversationsDeleted": "Proyek akan dihapus dari sidebar. File, memori, dan data sesi tetap dipertahankan.",
@@ -170,10 +162,6 @@
     "deleteSessions_one": "Hapus {{count}} Sesi",
     "deleteSessions_other": "Hapus {{count}} Sesi",
     "selectedSessions_one": "{{count}} sesi terpilih",
-    "selectedSessions_other": "{{count}} sesi terpilih",
-    "archiveSessions_one": "Arsipkan {{count}} sesi",
-    "archiveSessions_other": "Arsipkan {{count}} sesi",
-    "archiveSessionsNotice_one": "Pengarsipan menyembunyikan sesi yang dipilih dari daftar aktif tanpa menghapus riwayatnya.",
-    "archiveSessionsNotice_other": "Pengarsipan menyembunyikan sesi yang dipilih dari daftar aktif tanpa menghapus riwayatnya."
+    "selectedSessions_other": "{{count}} sesi terpilih"
   }
 }

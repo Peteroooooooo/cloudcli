@@ -26,6 +26,9 @@ type ParsedSession = {
   isExplicitName?: boolean;
 };
 
+/** Directories under a project folder that hold subagent transcripts and tool output, never sessions. */
+const NON_SESSION_DIRECTORY_NAMES: ReadonlySet<string> = new Set(['subagents', 'tool-results']);
+
 /**
  * Session indexer for Claude transcript artifacts.
  */
@@ -42,32 +45,45 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
    * `~/.claude/projects/<encoded-cwd>/<session-id>/subagents/agent-<id>.jsonl`.
    * Those files repeat the parent session's `sessionId`, so indexing them as
    * standalone sessions overwrites the parent row's `jsonl_path` and corrupts
-   * the main session record. The recursive scan in `synchronize()` reaches
-   * them, so both entry points must skip them.
+   * the main session record. The scan in `synchronize()` does not descend into
+   * those directories; the watcher's single-file entry point checks here.
    */
   private isSubagentTranscript(filePath: string): boolean {
     const pathParts = path.normalize(filePath).split(path.sep);
-    return pathParts.includes('subagents') || pathParts.includes('tool-results');
+    return pathParts.some((part) => NON_SESSION_DIRECTORY_NAMES.has(part));
+  }
+
+  /**
+   * The first prompt of each session, from `~/.claude/history.jsonl`. That file
+   * grows with every prompt ever sent, so it is read only once a transcript
+   * turns out to need it, and at most once per call.
+   */
+  private createHistoryNameLoader(): () => Promise<Map<string, string>> {
+    let nameMap: Promise<Map<string, string>> | null = null;
+    return () => {
+      nameMap ??= buildLookupMap(path.join(this.claudeHome, 'history.jsonl'), 'sessionId', 'display');
+      return nameMap;
+    };
   }
 
   /**
    * Scans ~/.claude/projects and upserts discovered sessions into DB.
    */
   async synchronize(since?: Date): Promise<number> {
-    const nameMap = await buildLookupMap(path.join(this.claudeHome, 'history.jsonl'), 'sessionId', 'display');
+    const loadHistoryNames = this.createHistoryNameLoader();
     const files = await findFilesRecursivelyChangedAfter(
       path.join(this.claudeHome, 'projects'),
       '.jsonl',
-      since ?? null
+      since ?? null,
+      {
+        indexedPaths: sessionsDb.getTranscriptPathsByProvider(this.provider),
+        skipDirectoryNames: NON_SESSION_DIRECTORY_NAMES,
+      },
     );
 
     let processed = 0;
     for (const filePath of files) {
-      if (this.isSubagentTranscript(filePath)) {
-        continue;
-      }
-
-      const parsed = await this.processSessionFile(filePath, nameMap);
+      const parsed = await this.processSessionFile(filePath, loadHistoryNames);
       if (!parsed) {
         continue;
       }
@@ -90,8 +106,7 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
       return null;
     }
 
-    const nameMap = await buildLookupMap(path.join(this.claudeHome, 'history.jsonl'), 'sessionId', 'display');
-    const parsed = await this.processSessionFile(filePath, nameMap);
+    const parsed = await this.processSessionFile(filePath, this.createHistoryNameLoader());
     if (!parsed) {
       return null;
     }
@@ -126,7 +141,7 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
    */
   private async processSessionFile(
     filePath: string,
-    nameMap: Map<string, string>
+    loadHistoryNames: () => Promise<Map<string, string>>
   ): Promise<ParsedSession | null> {
     const parsed = await extractFirstValidJsonlData(filePath, (rawData) => {
       const data = rawData as Record<string, unknown>;
@@ -173,7 +188,7 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
 
     let sessionName = await this.extractSessionTitle(filePath, parsed.sessionId);
     if (!sessionName) {
-      sessionName = nameMap.get(parsed.sessionId);
+      sessionName = (await loadHistoryNames()).get(parsed.sessionId);
     }
 
     return {

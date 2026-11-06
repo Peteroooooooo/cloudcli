@@ -43,6 +43,7 @@ import {
   rememberClaudeContextWindow
 } from '@/modules/providers/services/provider-token-usage.service.js';
 import { createCompleteMessage, createNormalizedMessage } from '@/shared/utils.js';
+import { truncateOutput } from '@/shared/message-unification.js';
 import type {
   AnyRecord,
   BackgroundTaskSummary,
@@ -92,6 +93,11 @@ const activeSessions = new Map<string, ActiveSession>();
 // entry lives exactly as long as the map entry it shadows: cleared when the
 // session is removed, and reset when a newer run takes the key over.
 const backgroundWork = createBackgroundWorkTracker();
+// Sessions whose process is held open past a turn's `result`, with the query
+// that holds it. The task tracker above misses a hold for tools that emit no
+// task events (ScheduleWakeup, Monitor, CronCreate, TaskCreate), and a
+// session that looks idle gets its held process replaced by the next turn.
+const heldProcesses = new Map<string, ClaudeQuery>();
 const pendingToolApprovals = new Map<string, ToolApprovalResolver>();
 // Sessions cancelled via abort-session. The abort handler already sent the
 // terminal `complete` (aborted: true) to the client, so the run loop must not
@@ -460,6 +466,7 @@ function addSession(
     // Whatever the superseded process had outstanding dies with it and will
     // never report, so the new run starts from an empty task set.
     backgroundWork.clear(sessionId);
+    heldProcesses.delete(sessionId);
   }
   const carried = superseding ? null : existing;
   activeSessions.set(sessionId, {
@@ -518,6 +525,7 @@ function removeSession(sessionId: string) {
   activeSessions.delete(sessionId);
   // No process, no background work: anything still tracked was killed with it.
   backgroundWork.clear(sessionId);
+  heldProcesses.delete(sessionId);
   // See addSession: a page cached while the process was up still says
   // `running` for any agent that never reported back.
   sessionHistoryCache.invalidate(sessionId);
@@ -1119,6 +1127,7 @@ async function queryClaudeSDK(
     }
     idleReleaseTimer = setTimeout(() => {
       idleReleaseTimer = null;
+      endHold();
       releasePromptStream();
     }, BG_WAIT_CEILING_MS);
     // Never let the hold keep the server process alive on its own.
@@ -1128,6 +1137,14 @@ async function queryClaudeSDK(
   // Hoisted above the try so the catch's cleanup can tell whether this run
   // still owns the activeSessions entry (or was superseded by a newer run).
   let queryInstance: ClaudeQuery | null = null;
+
+  // Clears this run's entry in heldProcesses, never a newer run's.
+  const endHold = () => {
+    const key = sessionKey();
+    if (key && queryInstance && heldProcesses.get(key) === queryInstance) {
+      heldProcesses.delete(key);
+    }
+  };
 
   try {
     const resolvedModel = await context.resolveResumeModel(sessionId, options.model);
@@ -1321,6 +1338,20 @@ async function queryClaudeSDK(
       return { behavior: 'deny', message: decision.message ?? 'User denied tool use' };
     };
 
+    // A stop that arrived while the run was being set up found nothing to
+    // interrupt: no query exists yet. Nothing below awaits before the session
+    // is registered, so from here on the runtime's own abort reaches it.
+    if ((options.stopSignal as AbortSignal | undefined)?.aborted) {
+      notifyRunStopped({
+        userId: ws?.userId || null,
+        provider: 'claude',
+        sessionId: sessionId || capturedSessionId || null,
+        sessionName: sessionSummary,
+        stopReason: 'aborted'
+      });
+      return;
+    }
+
     // The SDK's own `query`, unless the caller supplies one (tests script the
     // stream to drive the hold logic below without a CLI process).
     const createQuery = context.createQuery ?? query;
@@ -1388,6 +1419,11 @@ async function queryClaudeSDK(
         }
         if (isSubagentPromptEcho(msg)) {
           continue;
+        }
+        // Same cap as history: a live result reaches every watching socket
+        // and stays in the run's replay buffer.
+        if (msg.kind === 'tool_result' && typeof msg.content === 'string') {
+          msg.content = truncateOutput(msg.content);
         }
         ws.send(msg);
       }
@@ -1457,6 +1493,7 @@ async function queryClaudeSDK(
         && !backgroundWork.hasOutstanding(sessionKey()!)
       ) {
         heldForBackgroundWork = false;
+        endHold();
         releasePromptStream();
       }
 
@@ -1506,11 +1543,15 @@ async function queryClaudeSDK(
         sawTaskEventThisTurn = false;
         if (holdForTurn) {
           heldForBackgroundWork = true;
+          if (sessionKey()) {
+            heldProcesses.set(sessionKey()!, queryInstance);
+          }
           scheduleRelease();
         } else {
           // Either nothing was backgrounded, or the background work just
           // reported in — let the CLI exit now, as it always has.
           heldForBackgroundWork = false;
+          endHold();
           releasePromptStream();
         }
       } else if (idleReleaseTimer) {
@@ -1609,6 +1650,7 @@ async function queryClaudeSDK(
       clearTimeout(idleReleaseTimer);
       idleReleaseTimer = null;
     }
+    endHold();
     releasePromptStream();
   }
 }
@@ -1636,9 +1678,10 @@ async function abortClaudeSDKSession(sessionId: string) {
     // Call interrupt() on the query instance
     await session.instance.interrupt();
 
-    // Release the held stdin stream; without this the CLI stays up for the rest
-    // of the post-turn hold even though the user cancelled.
-    session.releaseInput?.();
+    // Stop the background tasks and release the held stdin stream; without
+    // this the CLI stays up for the rest of the post-turn hold, and waits out
+    // its background agents, even though the user cancelled.
+    releaseHeldSession(sessionId);
 
     // Update session status
     session.status = 'aborted';
@@ -1665,6 +1708,16 @@ async function abortClaudeSDKSession(sessionId: string) {
  */
 function listClaudeSDKBackgroundWork(): Array<{ sessionId: string; tasks: BackgroundTaskSummary[] }> {
   return backgroundWork.list();
+}
+
+/**
+ * Whether the session's process is held open past its turn, with or without
+ * task events to show for it.
+ * @param {string} sessionId - Session identifier
+ * @returns {boolean} True while the hold lasts
+ */
+function isClaudeSDKSessionHeld(sessionId: string) {
+  return heldProcesses.has(sessionId) && getSession(sessionId)?.status === 'active';
 }
 
 /**
@@ -1762,6 +1815,7 @@ export const claudeRuntime = {
     listPending: getPendingApprovalsForSession,
   },
   listBackgroundWork: listClaudeSDKBackgroundWork,
+  isHoldingSession: isClaudeSDKSessionHeld,
   stopBackgroundTask: stopClaudeSDKTask,
 };
 
@@ -1770,6 +1824,7 @@ export {
   queryClaudeSDK,
   abortClaudeSDKSession,
   listClaudeSDKBackgroundWork,
+  isClaudeSDKSessionHeld,
   stopClaudeSDKTask,
   isClaudeSDKSessionActive,
   getClaudeSDKSessionStartTime,

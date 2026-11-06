@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { sessionsDb } from '@/modules/database/index.js';
 import { ChatSessionWriter } from '@/modules/websocket/services/chat-session-writer.service.js';
 import { broadcastSessionUpserted } from '@/modules/websocket/services/session-upsert-broadcast.service.js';
@@ -22,8 +24,16 @@ type ChatRunStatus = 'running' | 'completed';
  * - `lastSeq` / `events`: the per-run event log. Every live event gets a
  *   monotonically increasing `seq` and is buffered so a reconnecting client
  *   can replay exactly the events it missed via `chat.subscribe`.
+ * - `runId`: names the run every `seq` belongs to. Each run counts from 1, so
+ *   a client's `lastSeq` only means something next to the run it came from.
+ * - `stopController`: aborted when a stop is requested. A stop can land while
+ *   the runtime is still setting up and has nothing registered to interrupt;
+ *   runtimes read the signal before they create their query or thread.
+ * - `stoppedAfterComplete`: lets one extra aborted `complete` through when a
+ *   stop ends work the CLI kept doing after the run completed.
  */
 type ChatRun = {
+  runId: string;
   appSessionId: string;
   provider: LLMProvider;
   providerSessionId: string | null;
@@ -33,6 +43,8 @@ type ChatRun = {
   writer: ChatSessionWriter;
   startedAt: number;
   completedAt: number | null;
+  stopController: AbortController;
+  stoppedAfterComplete: boolean;
 };
 
 /**
@@ -58,6 +70,17 @@ const MAX_BUFFERED_EVENTS_PER_RUN = 5000;
  * path all consult it instead of asking each provider runtime individually.
  */
 const runs = new Map<string, ChatRun>();
+
+/**
+ * Sockets viewing each session, whether or not a run is going. A run started
+ * with nobody's socket (a queued or scheduled turn) streams to these, so an
+ * open tab shows it live instead of only after the next history refresh.
+ */
+const viewersBySession = new Map<string, Set<RealtimeClientConnection>>();
+const sessionsByViewer = new Map<RealtimeClientConnection, Set<string>>();
+
+/** Called after any run's terminal `complete`, e.g. to send what was queued behind it. */
+const runCompletedListeners = new Set<(appSessionId: string) => void>();
 
 /**
  * Answers whether a completed run must stay registered a while longer. Set by
@@ -106,7 +129,10 @@ function decorateAndRecordEvent(run: ChatRun, message: NormalizedMessage): Norma
   // still emit its own `complete` from its exit handler moments later.
   // Whichever arrives first wins; the duplicate is dropped here.
   if (message.kind === 'complete' && run.status === 'completed') {
-    return null;
+    if (!run.stoppedAfterComplete) {
+      return null;
+    }
+    run.stoppedAfterComplete = false;
   }
 
   run.lastSeq += 1;
@@ -114,13 +140,17 @@ function decorateAndRecordEvent(run: ChatRun, message: NormalizedMessage): Norma
   const outbound: NormalizedMessage = {
     ...message,
     sessionId: run.appSessionId,
+    runId: run.runId,
     seq: run.lastSeq,
   };
 
+  const completing = message.kind === 'complete' && run.status === 'running';
   if (message.kind === 'complete') {
     // The provider may report its own id here; the frontend only ever knows
     // the app id, so the "actual" id is by definition the app id as well.
     outbound.actualSessionId = run.appSessionId;
+  }
+  if (completing) {
     run.status = 'completed';
     run.completedAt = Date.now();
     evictRunLater(run);
@@ -129,6 +159,16 @@ function decorateAndRecordEvent(run: ChatRun, message: NormalizedMessage): Norma
   run.events.push(outbound);
   if (run.events.length > MAX_BUFFERED_EVENTS_PER_RUN) {
     run.events.splice(0, run.events.length - MAX_BUFFERED_EVENTS_PER_RUN);
+  }
+
+  if (completing) {
+    for (const listener of runCompletedListeners) {
+      try {
+        listener(run.appSessionId);
+      } catch (error) {
+        console.error('[ChatRunRegistry] Run-completed listener failed', error);
+      }
+    }
   }
 
   return outbound;
@@ -193,10 +233,11 @@ export const chatRunRegistry = {
     provider: LLMProvider;
     providerSessionId: string | null;
     /**
-     * The socket that asked for this run, or `null` for one nobody is watching
-     * — a scheduled message fires with no browser attached. The writer's event
-     * buffer still records everything, so a client that subscribes later
-     * replays the run from its start.
+     * The socket that asked for this run, or `null` for one nobody started
+     * from a tab — a scheduled or queued message. Either way every socket
+     * viewing the session is attached, and the writer's event buffer records
+     * everything, so a client that subscribes later replays the run from its
+     * start.
      */
     connection: RealtimeClientConnection | null;
     userId: string | number | null;
@@ -207,6 +248,7 @@ export const chatRunRegistry = {
     }
 
     const run: ChatRun = {
+      runId: randomUUID(),
       appSessionId: input.appSessionId,
       provider: input.provider,
       providerSessionId: input.providerSessionId,
@@ -216,6 +258,8 @@ export const chatRunRegistry = {
       writer: null as unknown as ChatSessionWriter,
       startedAt: Date.now(),
       completedAt: null,
+      stopController: new AbortController(),
+      stoppedAfterComplete: false,
     };
 
     run.writer = new ChatSessionWriter({
@@ -229,8 +273,79 @@ export const chatRunRegistry = {
       decorateOutboundEvent: (message) => decorateAndRecordEvent(run, message),
     });
 
+    for (const viewer of viewersBySession.get(input.appSessionId) ?? []) {
+      run.writer.updateWebSocket(viewer);
+    }
+
     runs.set(input.appSessionId, run);
     return run;
+  },
+
+  /**
+   * Records which sessions a socket is viewing, replacing what it viewed
+   * before: a tab subscribes to the session it switched to, and must stop
+   * being handed new runs of the one it left.
+   */
+  setViewedSessions(connection: RealtimeClientConnection, appSessionIds: string[]): void {
+    this.forgetConnection(connection);
+    const viewed = new Set(appSessionIds);
+    if (viewed.size === 0) {
+      return;
+    }
+    sessionsByViewer.set(connection, viewed);
+    for (const appSessionId of viewed) {
+      let viewers = viewersBySession.get(appSessionId);
+      if (!viewers) {
+        viewers = new Set();
+        viewersBySession.set(appSessionId, viewers);
+      }
+      viewers.add(connection);
+    }
+  },
+
+  /** Drops a socket from every session it was viewing. */
+  forgetConnection(connection: RealtimeClientConnection): void {
+    for (const appSessionId of sessionsByViewer.get(connection) ?? []) {
+      const viewers = viewersBySession.get(appSessionId);
+      viewers?.delete(connection);
+      if (viewers?.size === 0) {
+        viewersBySession.delete(appSessionId);
+      }
+    }
+    sessionsByViewer.delete(connection);
+  },
+
+  /** Subscribes to every run's terminal `complete`. Returns an unsubscribe function. */
+  onRunCompleted(listener: (appSessionId: string) => void): () => void {
+    runCompletedListeners.add(listener);
+    return () => {
+      runCompletedListeners.delete(listener);
+    };
+  },
+
+  /**
+   * Marks a run as asked to stop. A runtime still setting up reads the signal
+   * and does not start the turn; one already registered is stopped by the
+   * caller through the runtime's own abort.
+   */
+  requestStop(run: ChatRun): void {
+    run.stopController.abort();
+  },
+
+  /**
+   * Tells every watcher that work which outlived a completed run was stopped.
+   * The run already sent its one `complete`; this sends a second, aborted one,
+   * which is what clients idle a session on.
+   */
+  announceStoppedAfterComplete(appSessionId: string): boolean {
+    const run = runs.get(appSessionId);
+    if (!run || run.status !== 'completed') {
+      return false;
+    }
+    run.stoppedAfterComplete = true;
+    run.writer.sendComplete({ exitCode: 0, aborted: true });
+    run.stoppedAfterComplete = false;
+    return true;
   },
 
   getRun(appSessionId: string): ChatRun | undefined {
@@ -330,5 +445,7 @@ export const chatRunRegistry = {
    */
   clearAll(): void {
     runs.clear();
+    viewersBySession.clear();
+    sessionsByViewer.clear();
   },
 };

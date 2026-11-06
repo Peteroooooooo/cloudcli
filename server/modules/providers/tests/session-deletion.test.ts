@@ -9,6 +9,7 @@ import { closeConnection, initializeDatabase, projectsDb, sessionsDb } from '@/m
 import { deleteOrArchiveProject } from '@/modules/projects/index.js';
 import { codexAppServer, type CodexThreadDeleteOutcome } from '@/modules/providers/list/codex/codex-app-server.client.js';
 import { sessionsService } from '@/modules/providers/services/sessions.service.js';
+import { connectedClients } from '@/modules/websocket/index.js';
 
 /**
  * A permanent delete in CloudCLI removes the session from the provider too,
@@ -229,27 +230,113 @@ test('a project is deleted only once every one of its sessions is gone from its 
   }
 });
 
-test('the old-sessions list has sessions idle for the given days, archived ones too, but not starred projects', { concurrency: false }, async () => {
+test('the old-sessions list has sessions idle for the given days, but not starred projects', { concurrency: false }, async () => {
   const now = Date.parse('2026-11-06T12:00:00.000Z');
   const daysAgo = (days: number) => new Date(now - days * 24 * 60 * 60 * 1000).toISOString();
 
   await withIsolatedDatabase(async () => {
     sessionsDb.createSession('old', 'claude', '/workspace/demo', 'Old', daysAgo(30), daysAgo(9));
-    sessionsDb.createSession('old-archived', 'codex', '/workspace/demo', 'Old archived', daysAgo(30), daysAgo(20));
-    sessionsDb.updateSessionIsArchived('old-archived', true);
+    sessionsDb.createSession('older', 'codex', '/workspace/demo', 'Older', daysAgo(30), daysAgo(20));
     sessionsDb.createSession('recent', 'claude', '/workspace/demo', 'Recent', daysAgo(30), daysAgo(2));
     sessionsDb.createSession('starred-old', 'claude', '/workspace/starred', 'Starred', daysAgo(30), daysAgo(40));
     projectsDb.updateProjectIsStarred('/workspace/starred', true);
 
     const stale = await sessionsService.listStaleSessions(7, now);
 
-    assert.deepEqual(
-      stale.map((session) => [session.sessionId, session.isArchived]),
-      [['old-archived', true], ['old', false]],
-    );
+    assert.deepEqual(stale.map((session) => session.sessionId), ['older', 'old']);
+    assert.equal('isArchived' in stale[1], false);
     assert.equal(stale[1].projectDisplayName, 'demo');
     assert.equal(stale[1].lastActivity, daysAgo(9));
 
-    assert.deepEqual((await sessionsService.listStaleSessions(15, now)).map((session) => session.sessionId), ['old-archived']);
+    assert.deepEqual((await sessionsService.listStaleSessions(15, now)).map((session) => session.sessionId), ['older']);
   });
+});
+
+/** Two open sockets, so a test can show that a client other than the one that asked is told. */
+function connectTwoClients(): { framesOf: (index: number) => Array<Record<string, unknown>>; disconnect: () => void } {
+  const frames: Array<Array<Record<string, unknown>>> = [[], []];
+  const sockets = frames.map((received) => ({
+    readyState: 1,
+    send: (data: string) => received.push(JSON.parse(data) as Record<string, unknown>),
+  }));
+  sockets.forEach((socket) => connectedClients.add(socket as never));
+  return {
+    framesOf: (index) => frames[index].filter((frame) => frame.kind === 'sessions_removed'),
+    disconnect: () => sockets.forEach((socket) => connectedClients.delete(socket as never)),
+  };
+}
+
+test('every open client is told when a session is deleted', { concurrency: false }, async () => {
+  await withTempHome(async (home) => {
+    const target = await writeClaudeSession(home, CLAUDE_ID);
+    await withIsolatedDatabase(async () => {
+      sessionsDb.createSession(CLAUDE_ID, 'claude', '/workspace/demo', 'Target', undefined, undefined, target.transcript);
+      const clients = connectTwoClients();
+      try {
+        await sessionsService.deleteOrArchiveSessionById(CLAUDE_ID, { force: true, deletedFromDisk: true });
+      } finally {
+        clients.disconnect();
+      }
+
+      for (const index of [0, 1]) {
+        assert.equal(clients.framesOf(index).length, 1, `socket ${index} is told once`);
+        assert.deepEqual(clients.framesOf(index)[0].sessionIds, [CLAUDE_ID]);
+        assert.deepEqual(clients.framesOf(index)[0].projectIds, []);
+      }
+    });
+  });
+});
+
+test('every open client is told which sessions a project delete took, and the project', { concurrency: false }, async () => {
+  await withTempHome(async (home) => {
+    const first = await writeClaudeSession(home, CLAUDE_ID);
+    const second = await writeClaudeSession(home, OTHER_CLAUDE_ID);
+    await withIsolatedDatabase(async () => {
+      sessionsDb.createSession(CLAUDE_ID, 'claude', '/workspace/demo', 'First', undefined, undefined, first.transcript);
+      sessionsDb.createSession(OTHER_CLAUDE_ID, 'claude', '/workspace/demo', 'Second', undefined, undefined, second.transcript);
+      const project = projectsDb.getProjectPath('/workspace/demo')!;
+      const clients = connectTwoClients();
+      try {
+        await deleteOrArchiveProject(project.project_id, true);
+      } finally {
+        clients.disconnect();
+      }
+
+      assert.equal(projectsDb.getProjectById(project.project_id), null);
+      for (const index of [0, 1]) {
+        const [event] = clients.framesOf(index);
+        assert.deepEqual((event.sessionIds as string[]).sort(), [CLAUDE_ID, OTHER_CLAUDE_ID].sort());
+        assert.deepEqual(event.projectIds, [project.project_id]);
+      }
+    });
+  });
+});
+
+test('a project delete that stops part-way still tells the clients about the sessions that went', { concurrency: false }, async () => {
+  const restore = replaceDeleteThread(async () => {
+    throw new Error('thread is attached to another thread');
+  });
+  try {
+    await withTempHome(async (home) => {
+      const claude = await writeClaudeSession(home, CLAUDE_ID);
+      await withIsolatedDatabase(async () => {
+        sessionsDb.createSession(CLAUDE_ID, 'claude', '/workspace/demo', 'Claude', undefined, undefined, claude.transcript);
+        sessionsDb.createAppSession('app-1', 'codex', '/workspace/demo', 'Codex');
+        sessionsDb.assignProviderSessionId('app-1', 'thread-1');
+        const project = projectsDb.getProjectPath('/workspace/demo')!;
+        const clients = connectTwoClients();
+        try {
+          await assert.rejects(deleteOrArchiveProject(project.project_id, true));
+        } finally {
+          clients.disconnect();
+        }
+
+        const [event] = clients.framesOf(1);
+        assert.deepEqual(event.sessionIds, [CLAUDE_ID]);
+        assert.deepEqual(event.projectIds, [], 'the project was kept');
+      });
+    });
+  } finally {
+    restore();
+  }
 });

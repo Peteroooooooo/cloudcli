@@ -36,5 +36,8 @@
   "unsavedChanges": {
     "confirmClose": "您有未儲存的變更。關閉此檔案並放棄這些變更？",
     "indicator": "未儲存的變更"
+  },
+  "loadError": {
+    "readOnly": "無法讀取此檔案：{{message}}。目前為唯讀顯示，無法儲存。"
   }
 }

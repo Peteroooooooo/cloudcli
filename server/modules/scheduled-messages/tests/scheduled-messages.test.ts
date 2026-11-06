@@ -5,11 +5,16 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { closeConnection, initializeDatabase, scheduledMessagesDb, sessionDraftsDb, sessionsDb, userDb } from '@/modules/database/index.js';
-import { dispatchDueScheduledMessages, dispatchQueuedMessages } from '@/modules/scheduled-messages/services/scheduled-message-dispatcher.service.js';
+import { closeScheduledMessageDispatcher, dispatchDueScheduledMessages, dispatchQueuedMessages, initializeScheduledMessageDispatcher } from '@/modules/scheduled-messages/services/scheduled-message-dispatcher.service.js';
 import { scheduledMessagesService } from '@/modules/scheduled-messages/services/scheduled-messages.service.js';
 import { chatRunRegistry, connectedClients } from '@/modules/websocket/index.js';
 
 const SESSION_ID = 'scheduled-session';
+
+/** Lets the turns a pass started end; a pass waits only for them to start. */
+function settleTurns(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
 
 async function withIsolatedDatabase(runTest: (userId: number) => void | Promise<void>): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
@@ -306,6 +311,7 @@ test('a provider failure is recorded on the message instead of vanishing', async
     });
 
     await dispatchDueScheduledMessages(createRuntime([], 'throw'));
+    await settleTurns();
 
     const row = scheduledMessagesDb.listForSession(userId, SESSION_ID)[0];
     assert.equal(row.status, 'failed');
@@ -338,6 +344,7 @@ test('a failed message can be dismissed, and stays dismissed', async () => {
       scheduledFor: new Date(Date.now() - 1_000).toISOString(),
     });
     await dispatchDueScheduledMessages(createRuntime([], 'throw'));
+    await settleTurns();
     assert.equal(scheduledMessagesDb.listForSession(userId, SESSION_ID)[0].status, 'failed');
 
     scheduledMessagesService.cancel(userId, scheduled.id);
@@ -441,7 +448,7 @@ test('a due message is announced to open tabs as it is claimed, before its turn 
   });
 });
 
-test('a pass announces each session it claimed from once, however many of its messages were due', async () => {
+test('a session with several due messages gets one per pass, the next after its turn ends', async () => {
   await withIsolatedDatabase(async (userId) => {
     const otherSessionId = 'other-scheduled-session';
     sessionsDb.createAppSession(otherSessionId, 'claude', tmpdir(), 'Other scheduled session');
@@ -458,11 +465,101 @@ test('a pass announces each session it claimed from once, however many of its me
       });
     }
     const tab = openTab();
+    const runs: RunCall[] = [];
 
-    assert.equal(await dispatchDueScheduledMessages(createRuntime([])), 3);
-
-    // One read per session is enough: a single GET returns all of its rows.
+    assert.equal(await dispatchDueScheduledMessages(createRuntime(runs)), 2);
+    assert.deepEqual(runs.map((run) => run.command).sort(), ['first for this session', 'only one for the other session']);
+    // Not claimed in a batch: the message still waiting has not been marked sent.
+    assert.deepEqual(
+      scheduledMessagesDb.listForSession(userId, SESSION_ID).map((row) => [row.content, row.status]).sort(),
+      [['first for this session', 'sent'], ['second for this session', 'pending']],
+    );
     assert.deepEqual(tab.announcements().map((frame) => frame.sessionId).sort(), [otherSessionId, SESSION_ID]);
+
+    await settleTurns();
+    assert.equal(await dispatchDueScheduledMessages(createRuntime(runs)), 1);
+    assert.equal(runs.at(-1)?.command, 'second for this session');
+  });
+});
+
+test('a long scheduled turn does not hold up another session\'s message, and its failure is still recorded', async () => {
+  await withIsolatedDatabase(async (userId) => {
+    const otherSessionId = 'other-scheduled-session';
+    sessionsDb.createAppSession(otherSessionId, 'claude', tmpdir(), 'Other scheduled session');
+    for (const [sessionId, content] of [
+      [SESSION_ID, 'long turn'],
+      [SESSION_ID, 'after the long turn'],
+      [otherSessionId, 'meanwhile elsewhere'],
+    ]) {
+      scheduledMessagesService.schedule({
+        userId,
+        sessionId,
+        content,
+        scheduledFor: new Date(Date.now() - 1_000).toISOString(),
+      });
+    }
+
+    let failLongTurn: (error: Error) => void = () => {};
+    const commands: string[] = [];
+    const runtime = {
+      hasRuntime: () => true,
+      hasBackgroundWork: () => false,
+      run: (_provider: string, command: string) => {
+        commands.push(command);
+        if (command !== 'long turn') {
+          return Promise.resolve();
+        }
+        return new Promise<void>((_resolve, reject) => {
+          failLongTurn = reject;
+        });
+      },
+      abort: async () => true,
+    } as never;
+
+    // Returns while the long turn is still going.
+    assert.equal(await dispatchDueScheduledMessages(runtime), 2);
+    assert.deepEqual(commands.sort(), ['long turn', 'meanwhile elsewhere']);
+
+    // Its session's next message waits for it instead of interrupting it.
+    assert.equal(await dispatchDueScheduledMessages(runtime), 0);
+    assert.equal(chatRunRegistry.isProcessing(SESSION_ID), true);
+
+    failLongTurn(new Error('provider exploded mid-turn'));
+    await settleTurns();
+    const longTurn = scheduledMessagesDb.listForSession(userId, SESSION_ID).find((row) => row.content === 'long turn');
+    assert.equal(longTurn?.status, 'failed');
+    assert.match(longTurn?.failure_reason ?? '', /provider exploded mid-turn/);
+
+    assert.equal(await dispatchDueScheduledMessages(runtime), 1);
+    assert.equal(commands.at(-1), 'after the long turn');
+  });
+});
+
+test('the dispatcher sends the next due message as soon as the turn before it ends', async () => {
+  await withIsolatedDatabase(async (userId) => {
+    for (const content of ['first', 'second']) {
+      scheduledMessagesService.schedule({
+        userId,
+        sessionId: SESSION_ID,
+        content,
+        scheduledFor: new Date(Date.now() - 1_000).toISOString(),
+      });
+    }
+
+    const runs: RunCall[] = [];
+    initializeScheduledMessageDispatcher(createRuntime(runs));
+    try {
+      // The poll is 30 s apart, so only the end of the first turn can have
+      // started the second one this soon.
+      const deadline = Date.now() + 5_000;
+      while (runs.length < 2 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.deepEqual(runs.map((run) => run.command), ['first', 'second']);
+    } finally {
+      closeScheduledMessageDispatcher();
+      await settleTurns();
+    }
   });
 });
 
@@ -477,6 +574,7 @@ test('a message that fails to send is announced again once the reason is recorde
     const tab = openTab();
 
     await dispatchDueScheduledMessages(createRuntime([], 'throw'));
+    await settleTurns();
 
     // Claimed (the banner comes down), then failed (it comes back as the
     // failure notice).

@@ -19,7 +19,7 @@ type SidebarRecentConversationsProps = {
   currentTime: Date;
   /**
    * The same row state and callbacks the Projects list hands its rows, so a
-   * conversation can be renamed, copied, forked or archived from here too.
+   * conversation can be renamed, copied, forked or deleted from here too.
    */
   sessionActions: SessionRowActions;
   onConversationSelect: (

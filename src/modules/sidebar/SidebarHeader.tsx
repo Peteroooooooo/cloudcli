@@ -1,4 +1,4 @@
-import { FolderPlus, Plus, RefreshCw, Search, X, PanelLeftClose } from 'lucide-react';
+import { Eraser, FolderPlus, Plus, RefreshCw, Search, X, PanelLeftClose } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { Button, Input } from '@/shared/ui';
@@ -18,8 +18,6 @@ type SidebarHeaderProps = {
   isLoading: boolean;
   projectsCount: number;
   runningSessionsCount: number;
-  archivedSessionsCount: number;
-  isArchivedSessionsLoading: boolean;
   searchFilter: string;
   onSearchFilterChange: (value: string) => void;
   onClearSearchFilter: () => void;
@@ -32,6 +30,8 @@ type SidebarHeaderProps = {
   onRefresh: () => void;
   isRefreshing: boolean;
   onCreateProject: () => void;
+  /** Opens the "clean up old sessions" dialog. */
+  onOpenStaleSessionsCleanup: () => void;
   onCollapseSidebar: () => void;
   t: TFunction;
 };
@@ -55,15 +55,13 @@ function LogoBlock({ t }: { t: TFunction }) {
   );
 }
 
-/** Rendered by SidebarContent at the top of the panel for the search box, search-mode tabs, refresh and new-project actions. */
+/** Rendered by SidebarContent at the top of the panel for the search box, search-mode tabs, refresh, old-session cleanup and new-project actions. */
 export default function SidebarHeader({
   isPWA,
   isMobile,
   isLoading,
   projectsCount,
   runningSessionsCount,
-  archivedSessionsCount,
-  isArchivedSessionsLoading,
   searchFilter,
   onSearchFilterChange,
   onClearSearchFilter,
@@ -75,17 +73,16 @@ export default function SidebarHeader({
   onRefresh,
   isRefreshing,
   onCreateProject,
+  onOpenStaleSessionsCleanup,
   onCollapseSidebar,
   t,
 }: SidebarHeaderProps) {
-  const showSearchTools = (projectsCount > 0 || runningSessionsCount > 0 || archivedSessionsCount > 0 || isArchivedSessionsLoading) && !isLoading;
+  const showSearchTools = (projectsCount > 0 || runningSessionsCount > 0) && !isLoading;
   const searchPlaceholder = searchMode === 'conversations'
     ? t('search.conversationsPlaceholder')
-    : searchMode === 'archived'
-      ? t('search.archivedPlaceholder', 'Search archived sessions...')
-      : searchMode === 'running'
-        ? t('search.runningPlaceholder', 'Search running sessions...')
-        : t('projects.searchPlaceholder');
+    : searchMode === 'running'
+      ? t('search.runningPlaceholder', 'Search running sessions...')
+      : t('projects.searchPlaceholder');
 
   return (
     <div className="flex-shrink-0">
@@ -121,6 +118,16 @@ export default function SidebarHeader({
                   isRefreshing ? 'animate-spin' : ''
                 }`}
               />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 rounded-lg p-0 text-muted-foreground hover:bg-accent/80 hover:text-foreground"
+              onClick={onOpenStaleSessionsCleanup}
+              title={t('staleCleanup.open', 'Clean up old sessions')}
+              aria-label={t('staleCleanup.open', 'Clean up old sessions')}
+            >
+              <Eraser className="h-3.5 w-3.5" />
             </Button>
             <Button
               variant="ghost"
@@ -221,6 +228,13 @@ export default function SidebarHeader({
               disabled={isRefreshing}
             >
               <RefreshCw className={`h-4 w-4 text-muted-foreground ${isRefreshing ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted/50 transition-all active:scale-95"
+              onClick={onOpenStaleSessionsCleanup}
+              aria-label={t('staleCleanup.open', 'Clean up old sessions')}
+            >
+              <Eraser className="h-4 w-4 text-muted-foreground" />
             </button>
             <button
               className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/90 text-primary-foreground transition-all active:scale-95"

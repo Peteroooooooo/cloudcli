@@ -30,8 +30,9 @@ function DiscordIcon({ className }: { className?: string }) {
 /** Rendered by Settings for the "about" tab, showing version, links and premium upsell cards. */
 export default function AboutTab() {
   const { t } = useTranslation('settings');
-  const { updateAvailable, latestVersion, currentVersion, releaseInfo } = useVersionCheck('siteboon', 'claudecodeui');
+  const { updateAvailable, latestVersion, currentVersion, releaseInfo, installMode } = useVersionCheck('siteboon', 'claudecodeui');
   const releasesUrl = releaseInfo?.htmlUrl || `${GITHUB_REPO_URL}/releases`;
+  const versionBadgeClassName = 'rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground';
 
   return (
     <div className="space-y-6">
@@ -48,14 +49,20 @@ export default function AboutTab() {
             >
               CloudCLI
             </span>
-            <a
-              href={releasesUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
-              v{currentVersion}
-            </a>
+            {/* A git checkout's version is its own; the upstream releases page
+                does not describe it. */}
+            {installMode === 'git' ? (
+              <span className={versionBadgeClassName}>v{currentVersion}</span>
+            ) : (
+              <a
+                href={releasesUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`${versionBadgeClassName} transition-colors hover:text-foreground`}
+              >
+                v{currentVersion}
+              </a>
+            )}
             {updateAvailable && latestVersion && (
               <a
                 href={releasesUrl}

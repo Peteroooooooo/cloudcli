@@ -4,6 +4,7 @@ import type { MutableRefObject } from 'react';
 import { api } from '@/shared/api';
 import type { MarkSessionIdle, SessionActivityMap,Project,ProjectSession,LLMProvider,NormalizedMessage,ChatMessage,DiffCalculator } from '@/shared/types';
 import type { SessionStore } from '@/modules/chat/hooks/useSessionStore';
+import type { LiveSeqCursor } from '@/modules/chat/hooks/useChatRealtimeHandlers';
 import { SESSION_MESSAGES_PAGE_SIZE } from '@/modules/chat/utils/sessionMessagePagination';
 import { createMessageHistoryRefreshCoordinator } from '@/modules/chat/utils/messageHistoryRefreshCoordinator';
 import { createCachedDiffCalculator } from '@/modules/chat/utils/messageTransforms';
@@ -102,8 +103,8 @@ type UseChatSessionStateArgs = {
   resetStreamingState: () => void;
   /** When each session's `chat.subscribe` was last sent; guards stale idle acks. */
   statusCheckSentAtRef: MutableRefObject<Map<string, number>>;
-  /** Highest live seq observed per session; sent as `lastSeq` on subscribe. */
-  lastSeqRef: MutableRefObject<Map<string, number>>;
+  /** Live-stream position per session; sent with `chat.subscribe`. */
+  lastSeqRef: MutableRefObject<Map<string, LiveSeqCursor>>;
   sessionStore: SessionStore;
 };
 
@@ -673,15 +674,19 @@ export function useChatSessionState({
 
   // Session replay/subscription remains active regardless of which main tab is
   // visible. Only persisted-history HTTP traffic is visibility-gated below.
+  // This is the one place a subscribe is sent: `ws` changes when the socket
+  // reconnects, so a reconnect re-subscribes here too.
   useEffect(() => {
     if (!selectedSession || !selectedProject || !ws) return;
 
+    const cursor = lastSeqRef.current.get(selectedSession.id);
     statusCheckSentAtRef.current.set(selectedSession.id, Date.now());
     sendMessage({
       type: 'chat.subscribe',
       sessions: [{
         sessionId: selectedSession.id,
-        lastSeq: lastSeqRef.current.get(selectedSession.id) ?? 0,
+        lastSeq: cursor?.seq ?? 0,
+        runId: cursor?.runId ?? undefined,
       }],
     });
   }, [lastSeqRef, selectedProject, selectedSession, sendMessage, statusCheckSentAtRef, ws]);

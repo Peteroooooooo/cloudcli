@@ -19,8 +19,6 @@ import type { Project } from '@/shared/types';
 
 vi.mock('@/shared/api', () => ({
   api: {
-    archivedProjects: () => Promise.resolve({ ok: true, json: async () => ({ data: { projects: [] } }) }),
-    getArchivedSessions: () => Promise.resolve({ ok: true, json: async () => ({ data: { sessions: [] } }) }),
     recentConversations: () => Promise.resolve({ ok: true, json: async () => ({ data: { conversations: [] } }) }),
   },
 }));

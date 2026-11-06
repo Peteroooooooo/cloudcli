@@ -1,6 +1,6 @@
 import { EditorView } from '@codemirror/view';
 import { unifiedMergeView } from '@codemirror/merge';
-import type { Extension } from '@codemirror/state';
+import { EditorState, type Extension } from '@codemirror/state';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -67,6 +67,9 @@ export default function CodeEditor({
     saving,
     saveSuccess,
     saveError,
+    loadError,
+    canSave,
+    diffOriginal,
     isBinary,
     previewKind,
     fileProjectId,
@@ -192,10 +195,10 @@ export default function CodeEditor({
       ...toolbarPanelExtension,
     ];
 
-    if (file.diffInfo && showDiff && file.diffInfo.old_string !== undefined) {
+    if (file.diffInfo && showDiff && diffOriginal !== null) {
       allExtensions.push(
         unifiedMergeView({
-          original: file.diffInfo.old_string,
+          original: diffOriginal,
           mergeControls: false,
           highlightChanges: true,
           syntaxHighlightDeletions: false,
@@ -210,10 +213,16 @@ export default function CodeEditor({
       allExtensions.push(EditorView.lineWrapping);
     }
 
+    if (loadError !== null) {
+      allExtensions.push(EditorState.readOnly.of(true));
+    }
+
     return allExtensions;
   }, [
+    diffOriginal,
     file.diffInfo,
     file.name,
+    loadError,
     minimapExtension,
     scrollToFirstChunkExtension,
     showDiff,
@@ -300,6 +309,7 @@ export default function CodeEditor({
             markdownPreview={markdownPreview}
             saving={saving}
             saveSuccess={saveSuccess}
+            canSave={canSave}
             hasUnsavedChanges={hasUnsavedChanges}
             onToggleMarkdownPreview={() => setMarkdownPreview((previous) => !previous)}
             onOpenHtmlPreview={openHtmlPreview}
@@ -326,6 +336,12 @@ export default function CodeEditor({
               unsavedChanges: t('unsavedChanges.indicator', 'Unsaved changes'),
             }}
           />
+
+          {loadError !== null && (
+            <div className="border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-300">
+              {t('loadError.readOnly', 'Could not read this file: {{message}}. It is shown read-only and cannot be saved.', { message: loadError })}
+            </div>
+          )}
 
           {saveError && (
             <div className="border-b border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300">

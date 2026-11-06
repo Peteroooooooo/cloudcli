@@ -55,7 +55,7 @@ type StaleSessionsCleanupProps = {
 type DeleteProgress = { settled: number; total: number };
 
 /**
- * Rendered by Sidebar from the archive view's "clean up old sessions" button:
+ * Rendered by Sidebar from the header's "clean up old sessions" button:
  * lists sessions nobody has touched for a while, grouped by project, and
  * permanently deletes the ticked ones from CloudCLI and from the agent that
  * owns them. While the sidebar is narrowed to one agent, so is the list.
@@ -179,7 +179,7 @@ export default function StaleSessionsCleanup({
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
               {t('staleCleanup.description', {
                 days: idleDays,
-                defaultValue: 'Sessions idle for {{days}} days or more, archived ones included. Starred projects and running sessions are not listed.',
+                defaultValue: 'Sessions idle for {{days}} days or more. Starred projects and running sessions are not listed.',
               })}
             </p>
             {providerFilter !== 'all' && (
@@ -312,9 +312,6 @@ export default function StaleSessionsCleanup({
                               <span>{PROVIDER_LABELS[session.provider] ?? session.provider}</span>
                               <span aria-hidden>·</span>
                               <span className="tabular-nums">{formatCompactAge(session.lastActivity, currentTime)}</span>
-                              {session.isArchived && (
-                                <span className="rounded bg-muted px-1 py-px">{t('staleCleanup.archived', 'Archived')}</span>
-                              )}
                             </span>
                             {failure && (
                               <span className="mt-0.5 block break-words text-[10px] text-red-600 dark:text-red-400">

@@ -92,3 +92,94 @@ for (const command of ['', '  \n\t']) {
     ]);
   });
 }
+
+function createContext(overrides: Partial<ProviderRuntimeContext> = {}): ProviderRuntimeContext {
+  return {
+    resolveProviderSessionId: () => null,
+    resolveResumeModel: async () => 'test-model',
+    getProviderModels: async () => ({ OPTIONS: [], DEFAULT: 'test-model' }),
+    normalizeMessage: () => [],
+    isProviderInstalled: async () => true,
+    ...overrides,
+  };
+}
+
+test('a Codex run stopped while it was being set up never starts a thread', async (t) => {
+  const start = t.mock.method(Codex.prototype, 'startThread', () => {
+    throw new Error('must not start');
+  });
+  const messages: Array<Record<string, unknown>> = [];
+  const stop = new AbortController();
+  stop.abort();
+
+  await codexRuntime.run('hey there', {
+    sessionId: 'app-stopped-early',
+    cwd: process.cwd(),
+    stopSignal: stop.signal,
+  }, { isWebSocketWriter: true, send: (message) => messages.push(message as Record<string, unknown>) }, createContext());
+
+  assert.equal(start.mock.callCount(), 0);
+  assert.ok(!messages.some((message) => message.kind === 'complete'), 'the gateway reports the stop');
+});
+
+test('a stop reaches a running Codex turn, and a finished one has nothing left to stop', async (t) => {
+  let releaseEvents: () => void = () => {};
+  const eventsReleased = new Promise<void>((resolve) => { releaseEvents = resolve; });
+  const thread = {
+    id: 'native-thread',
+    async runStreamed() {
+      return { events: (async function* () {
+        yield { type: 'thread.started', thread_id: 'native-thread' };
+        await eventsReleased;
+        yield { type: 'turn.completed', usage: {} };
+      })() };
+    },
+  } as unknown as Thread;
+  t.mock.method(Codex.prototype, 'startThread', () => thread);
+  const messages: Array<Record<string, unknown>> = [];
+  const writer = { isWebSocketWriter: true, send: (message: unknown) => messages.push(message as Record<string, unknown>) };
+
+  const stop = new AbortController();
+  const stoppedRun = codexRuntime.run('first', { sessionId: 'app-codex-stop', cwd: process.cwd(), stopSignal: stop.signal }, writer, createContext());
+  await new Promise((resolve) => { setTimeout(resolve, 30); });
+  stop.abort();
+  releaseEvents();
+  await stoppedRun;
+  assert.ok(!messages.some((message) => message.kind === 'complete'), 'a stopped turn sends no complete of its own');
+  assert.equal(codexRuntime.abort('app-codex-stop'), false, 'the stopped run left no entry behind');
+
+  const finishedRun = codexRuntime.run('second', { sessionId: 'app-codex-stop', cwd: process.cwd() }, writer, createContext());
+  await finishedRun;
+  assert.ok(messages.some((message) => message.kind === 'complete' && message.exitCode === 0));
+  assert.equal(codexRuntime.abort('app-codex-stop'), false, 'a completed turn reports nothing stopped');
+});
+
+test('a live Codex tool result is capped like the history copy before it is sent', async (t) => {
+  const thread = {
+    id: 'native-thread',
+    async runStreamed() {
+      return { events: (async function* () {
+        yield { type: 'thread.started', thread_id: 'native-thread' };
+        yield {
+          type: 'item.completed',
+          item: { id: 'item_0', type: 'command_execution', command: 'cat big.log', aggregated_output: 'x'.repeat(100_000), status: 'completed', exit_code: 0 },
+        };
+      })() };
+    },
+  } as unknown as Thread;
+  t.mock.method(Codex.prototype, 'startThread', () => thread);
+  const messages: Array<Record<string, unknown>> = [];
+
+  await codexRuntime.run('hey there', { sessionId: 'app-codex-cap', cwd: process.cwd() }, {
+    isWebSocketWriter: true,
+    send: (message) => messages.push(message as Record<string, unknown>),
+  }, createContext({
+    normalizeMessage: (raw) => (raw as Record<string, unknown>).type === 'item'
+      ? [{ id: 'item_0_result', kind: 'tool_result', toolId: 'item_0', content: 'x'.repeat(100_000) } as never]
+      : [],
+  }));
+
+  const live = messages.find((message) => message.kind === 'tool_result');
+  assert.ok(typeof live?.content === 'string', 'the result was sent');
+  assert.ok(live.content.length < 41_000, `sent ${live.content.length} characters`);
+});

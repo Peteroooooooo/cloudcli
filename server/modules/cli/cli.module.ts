@@ -1,7 +1,8 @@
-import { execFileSync, execSync } from 'node:child_process';
+import { exec, execFileSync, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 
 import spawn from 'cross-spawn';
 
@@ -10,6 +11,11 @@ import { findApplicationRoot, getModuleDirectory } from '@/shared/utils.js';
 
 import { createCliService } from './cli.service.js';
 import { createSandboxCommandService } from './sandbox.service.js';
+
+const execAsync = promisify(exec);
+// The registry check is best effort; without a network it must give up
+// instead of hanging around for the default npm retry time.
+const LATEST_VERSION_CHECK_TIMEOUT_MS = 10_000;
 
 /**
  * Creates the production CLI application for the executable entrypoint. This is
@@ -64,19 +70,20 @@ export function createCliApplication(): CliApplication {
     applicationRoot,
     defaultDatabasePath: path.join(homeDirectory, '.cloudcli', 'auth.db'),
     homeDirectory,
+    // Same rule the server uses for `/health`.
+    installMode: fs.existsSync(path.join(applicationRoot, '.git')) ? 'git' : 'npm',
     packageMetadata,
     environment: process.env,
     fileSystem,
     output,
     sandboxService,
     getLatestPackageVersion: async () => {
-      // Yield first so the default `start` command can begin loading the server
-      // before this best-effort npm registry check runs.
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      return execSync(
+      // Asynchronous, so the server keeps starting while npm answers.
+      const { stdout } = await execAsync(
         'npm show @cloudcli-ai/cloudcli version',
-        { encoding: 'utf8' },
-      ).trim();
+        { encoding: 'utf8', timeout: LATEST_VERSION_CHECK_TIMEOUT_MS, windowsHide: true },
+      );
+      return stdout.trim();
     },
     updateGlobalPackage: () => {
       execSync('npm update -g @cloudcli-ai/cloudcli', { stdio: 'inherit' });

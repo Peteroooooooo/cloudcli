@@ -125,10 +125,6 @@ function Sidebar({
     pendingDeletion,
     showVersionModal,
     filteredProjects,
-    archivedProjects,
-    archivedSessions,
-    archivedSessionsCount,
-    isArchivedSessionsLoading,
     recentConversations,
     recentConversationsTotal,
     recentConversationsHasMore,
@@ -161,9 +157,6 @@ function Sidebar({
     requestProjectDelete,
     confirmDeleteProject,
     handleProjectSelect,
-    openArchivedSession,
-    restoreArchivedProject,
-    restoreArchivedSession,
     refreshProjects,
     updateSessionSummary,
     forkSession,
@@ -317,10 +310,6 @@ function Sidebar({
             isLoading={isLoading}
             projects={projects}
             runningSessionsCount={runningSessionsCount}
-            archivedProjects={archivedProjects}
-            archivedSessions={archivedSessions}
-            archivedSessionsCount={archivedSessionsCount}
-            isArchivedSessionsLoading={isArchivedSessionsLoading}
             recentConversations={recentConversations}
             recentConversationsTotal={recentConversationsTotal}
             recentConversationsHasMore={recentConversationsHasMore}
@@ -341,18 +330,8 @@ function Sidebar({
             conversationResults={conversationResults}
             isSearching={isSearching}
             searchProgress={searchProgress}
-            onRestoreArchivedProject={restoreArchivedProject}
             onLoadMoreRecentConversations={loadMoreRecentConversations}
             onRetryRecentConversations={reloadRecentConversations}
-            onArchivedSessionClick={openArchivedSession}
-            onRestoreArchivedSession={restoreArchivedSession}
-            onDeleteArchivedSession={(session) => {
-              showDeleteSessionConfirmation(
-                session.sessionId,
-                session.sessionTitle,
-                { isArchived: true },
-              );
-            }}
             onOpenStaleSessionsCleanup={() => setShowStaleCleanup(true)}
             onConversationResultClick={(projectId: string | null, sessionId: string, provider: string, messageTimestamp?: string | null, messageSnippet?: string | null) => {
               // `projectId` (DB key) is the canonical identifier post-migration.

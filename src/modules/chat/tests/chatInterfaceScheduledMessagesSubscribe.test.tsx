@@ -24,6 +24,8 @@ const harness = vi.hoisted(() => ({
     schedule: async () => null,
     cancel: async () => false,
   })),
+  requestLatestMessages: vi.fn(async (_sessionId: string, _allowNetwork?: boolean) => {}),
+  useChatRealtimeHandlers: vi.fn((_args: { onWebSocketReconnect?: () => void | Promise<void> }) => {}),
 }));
 
 vi.mock('@/modules/chat/composer/useScheduledMessages', () => ({
@@ -53,10 +55,10 @@ vi.mock('@/modules/chat/hooks/useChatSessionState', () => ({
     chatMessages: [],
     currentSessionId: harness.sessionId,
     setCurrentSessionId: () => {},
-    requestLatestMessages: async () => {},
+    requestLatestMessages: harness.requestLatestMessages,
   }),
 }));
-vi.mock('@/modules/chat/hooks/useChatRealtimeHandlers', () => ({ useChatRealtimeHandlers: () => {} }));
+vi.mock('@/modules/chat/hooks/useChatRealtimeHandlers', () => ({ useChatRealtimeHandlers: harness.useChatRealtimeHandlers }));
 vi.mock('@/modules/chat/hooks/useChatComposerState', () => ({
   useChatComposerState: () => ({ input: '', setInput: () => {}, textareaRef: { current: null } }),
 }));
@@ -91,4 +93,26 @@ test('ChatInterface gives useScheduledMessages the websocket subscribe, so the b
       'useScheduledMessages must get the websocket context\'s subscribe, or scheduled_messages_changed is never heard',
     );
   }
+});
+
+test('a reconnect refreshes history without sending a second subscribe', async () => {
+  // useChatSessionState re-subscribes when the socket changes; a subscribe
+  // from here as well replayed the missed events twice.
+  const sent: unknown[] = [];
+  render(
+    <ChatInterface
+      isActive
+      selectedProject={project}
+      selectedSession={session}
+      ws={null}
+      sendMessage={(message: unknown) => { sent.push(message); }}
+    />,
+  );
+
+  const handlers = harness.useChatRealtimeHandlers.mock.calls.at(-1)?.[0];
+  assert.ok(handlers?.onWebSocketReconnect, 'ChatInterface handles reconnects');
+  await handlers.onWebSocketReconnect();
+
+  assert.deepEqual(harness.requestLatestMessages.mock.calls.at(-1), [harness.sessionId, true]);
+  assert.deepEqual(sent.filter((message) => (message as { type?: string }).type === 'chat.subscribe'), []);
 });

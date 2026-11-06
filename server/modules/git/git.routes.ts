@@ -87,11 +87,12 @@ function validateFilePath(file, projectPath) {
     throw new Error('Invalid file path');
   }
   // Prevent path traversal: resolve the file relative to the project root
-  // and ensure the result stays within the project directory
+  // and ensure the result stays within the project directory.
+  // `path.relative` compares case-insensitively on win32 (`d:\` vs `D:\`) and
+  // handles a drive-root repository; another drive comes back absolute.
   if (projectPath) {
-    const resolved = path.resolve(projectPath, file);
-    const normalizedRoot = path.resolve(projectPath) + path.sep;
-    if (!resolved.startsWith(normalizedRoot) && resolved !== path.resolve(projectPath)) {
+    const relativePath = path.relative(path.resolve(projectPath), path.resolve(projectPath, file));
+    if (relativePath === '..' || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) {
       throw new Error('Invalid file path: path traversal detected');
     }
   }

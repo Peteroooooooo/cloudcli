@@ -15,15 +15,12 @@ import type { Project, SessionWithProvider, SidebarProjectListProps, SidebarSess
  */
 
 const deleteSession = vi.fn();
-const getArchivedSessions = vi.fn();
 const recentConversations = vi.fn();
 const alertMock = vi.fn();
 
 vi.mock('@/shared/api', () => ({
   api: {
-    deleteSession: (sessionId: string, hardDelete?: boolean) => deleteSession(sessionId, hardDelete),
-    archivedProjects: () => Promise.resolve({ ok: true, json: async () => ({ data: { projects: [] } }) }),
-    getArchivedSessions: () => getArchivedSessions(),
+    deleteSession: (sessionId: string) => deleteSession(sessionId),
     recentConversations: () => recentConversations(),
     migrateLegacyProjectStars: () => Promise.resolve({ ok: true, json: async () => ({}) }),
   },
@@ -143,8 +140,6 @@ beforeEach(() => {
   recordedOptionsProps.length = 0;
   deleteSession.mockReset();
   deleteSession.mockResolvedValue({ ok: true, text: async () => '' });
-  getArchivedSessions.mockReset();
-  getArchivedSessions.mockImplementation(() => jsonResponse({ sessions: [] }));
   recentConversations.mockReset();
   recentConversations.mockImplementation(() => jsonResponse({ conversations: [], total: 0, hasMore: false }));
   alertMock.mockReset();
@@ -393,10 +388,10 @@ test('confirming a bulk delete deletes every id once and clears the selection', 
   assert.deepEqual(result.current.pendingDeletion, { kind: 'sessions', sessionIds: ['s1', 's2'] });
 
   await act(async () => {
-    await result.current.confirmDeleteSessions(true);
+    await result.current.confirmDeleteSessions();
   });
 
-  assert.deepEqual(deleteSession.mock.calls, [['s1', true], ['s2', true]]);
+  assert.deepEqual(deleteSession.mock.calls, [['s1'], ['s2']]);
   assert.deepEqual(onSessionDelete.mock.calls, [['s1'], ['s2']]);
   assert.equal(result.current.pendingDeletion, null);
   assert.equal(result.current.sessionSelection, null);
@@ -420,7 +415,7 @@ test('a bulk delete that only partly succeeds keeps the failed rows ticked and s
   });
 
   await act(async () => {
-    await result.current.confirmDeleteSessions(false);
+    await result.current.confirmDeleteSessions();
   });
 
   assert.deepEqual(onSessionDelete.mock.calls, [['s1'], ['s3']], 'the sessions that went are still reported');
@@ -434,7 +429,7 @@ test('a bulk delete that only partly succeeds keeps the failed rows ticked and s
   consoleError.mockRestore();
 });
 
-test('a bulk delete prunes the recents feed, lowers its total and refetches the archive', async () => {
+test('a bulk delete prunes the recents feed and lowers its total', async () => {
   recentConversations.mockImplementation(() =>
     jsonResponse({
       conversations: ['s1', 's2', 's9'].map((sessionId) => ({ sessionId, provider: 'claude', projectId: 'project-1' })),
@@ -449,18 +444,16 @@ test('a bulk delete prunes the recents feed, lowers its total and refetches the 
   });
   await waitFor(() => assert.equal(result.current.recentConversations.length, 3));
   assert.equal(result.current.recentConversationsTotal, 7);
-  const archiveFetchesBefore = getArchivedSessions.mock.calls.length;
 
   act(() => {
     result.current.showDeleteSelectedSessionsConfirmation(['s1', 's2']);
   });
   await act(async () => {
-    await result.current.confirmDeleteSessions(false);
+    await result.current.confirmDeleteSessions();
   });
 
   assert.deepEqual(result.current.recentConversations.map((conversation) => conversation.sessionId), ['s9']);
   assert.equal(result.current.recentConversationsTotal, 5, 'the total drops by the rows that left the feed');
-  assert.equal(getArchivedSessions.mock.calls.length, archiveFetchesBefore + 1, 'the archive is refetched once');
 });
 
 test('accepting the dialog ends selection mode at once, and a second confirmation cannot resend the same ids', async () => {
@@ -479,7 +472,7 @@ test('accepting the dialog ends selection mode at once, and a second confirmatio
 
   let firstConfirmation: Promise<void> = Promise.resolve();
   act(() => {
-    firstConfirmation = result.current.confirmDeleteSessions(false);
+    firstConfirmation = result.current.confirmDeleteSessions();
   });
   assert.equal(result.current.sessionSelection, null, 'the Delete button is gone while the requests are out');
 
@@ -488,9 +481,9 @@ test('accepting the dialog ends selection mode at once, and a second confirmatio
     result.current.showDeleteSelectedSessionsConfirmation(['s1', 's2']);
   });
   await act(async () => {
-    await result.current.confirmDeleteSessions(false);
+    await result.current.confirmDeleteSessions();
   });
-  assert.deepEqual(deleteSession.mock.calls, [['s1', false], ['s2', false]], 'no id is sent twice');
+  assert.deepEqual(deleteSession.mock.calls, [['s1'], ['s2']], 'no id is sent twice');
 
   // A selection started meanwhile belongs to the user, not to the delete.
   act(() => {
@@ -521,10 +514,10 @@ test('a session that starts a response while the dialog is open is skipped, not 
   rerender({ activeSessions: new Set(['s2', 's3']), backgroundSessionIds: new Set(['s3']) });
 
   await act(async () => {
-    await result.current.confirmDeleteSessions(true);
+    await result.current.confirmDeleteSessions();
   });
 
-  assert.deepEqual(deleteSession.mock.calls, [['s1', true], ['s3', true]]);
+  assert.deepEqual(deleteSession.mock.calls, [['s1'], ['s3']]);
   assert.deepEqual(onSessionDelete.mock.calls, [['s1'], ['s3']]);
   assert.equal(alertMock.mock.calls.length, 0);
 });

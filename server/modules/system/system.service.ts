@@ -29,12 +29,21 @@ export function createSystemUpdateService(dependencies: SystemUpdateDependencies
   return {
     /** Selects and executes the correct update workflow for this installation. */
     async updateSystem() {
+      // A git checkout runs whatever branch was built from it. The old
+      // workflow switched it to `main`, pulled and reinstalled without
+      // rebuilding, so the running app no longer matched the checkout.
+      if (!dependencies.isPlatform && dependencies.installMode === 'git') {
+        return {
+          success: false as const,
+          refused: true as const,
+          error: 'In-app updates are disabled for git installs. Update the checkout with git, then rebuild and restart.',
+        };
+      }
+
       const updateCommand = dependencies.isPlatform
         ? 'npm run update:platform'
-        : dependencies.installMode === 'git'
-          ? 'git checkout main && git pull && npm install'
-          : 'npm install -g @cloudcli-ai/cloudcli@latest';
-      const workingDirectory = dependencies.isPlatform || dependencies.installMode === 'git'
+        : 'npm install -g @cloudcli-ai/cloudcli@latest';
+      const workingDirectory = dependencies.isPlatform
         ? dependencies.appRoot
         : dependencies.homeDirectory;
 

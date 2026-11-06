@@ -29,6 +29,10 @@ type PtySessionEntry = {
   pty: IPty;
   ws: WebSocket | null;
   buffer: string[];
+  bufferBytes: number;
+  // When the pty last wrote output; a detached pty is only reclaimed after
+  // PTY_IDLE_TIMEOUT without any.
+  lastOutputAt: number;
   timeoutId: NodeJS.Timeout | null;
   projectPath: string;
   sessionId: string | null;
@@ -39,7 +43,9 @@ type PtySessionEntry = {
 };
 
 const ptySessionsMap = new Map<string, PtySessionEntry>();
-const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
+const PTY_IDLE_TIMEOUT = 30 * 60 * 1000;
+// Output kept for replay when a client reattaches; the oldest is dropped first.
+const PTY_REPLAY_BUFFER_BYTES = 2 * 1024 * 1024;
 const SHELL_URL_PARSE_BUFFER_LIMIT = 32768;
 const TRAILING_URL_PUNCTUATION_REGEX = /[)\]}>.,;:!?]+$/;
 
@@ -669,6 +675,8 @@ export function handleShellConnection(
           pty: shellProcess,
           ws,
           buffer: [],
+          bufferBytes: 0,
+          lastOutputAt: Date.now(),
           timeoutId: null,
           projectPath,
           sessionId,
@@ -685,11 +693,12 @@ export function handleShellConnection(
             return;
           }
 
-          if (session.buffer.length < 5000) {
-            session.buffer.push(chunk);
-          } else {
-            session.buffer.shift();
-            session.buffer.push(chunk);
+          session.lastOutputAt = Date.now();
+          session.buffer.push(chunk);
+          session.bufferBytes += Buffer.byteLength(chunk);
+          // The newest chunk is always kept, even one larger than the cap.
+          while (session.bufferBytes > PTY_REPLAY_BUFFER_BYTES && session.buffer.length > 1) {
+            session.bufferBytes -= Buffer.byteLength(session.buffer.shift() as string);
           }
 
           if (session.ws && session.ws.readyState === WebSocket.OPEN) {
@@ -851,16 +860,27 @@ export function handleShellConnection(
     if (session.timeoutId) {
       clearTimeout(session.timeoutId);
     }
-    session.timeoutId = setTimeout(() => {
+    // A detached pty may be running a long task the user comes back to, so it
+    // is only killed once it has been silent for PTY_IDLE_TIMEOUT. Idle time
+    // counts from the detach at the earliest.
+    const detachedAt = Date.now();
+    const reclaimWhenIdle = () => {
       // A reconnect may win just as this timer becomes runnable. Re-check the
       // active socket so a queued cleanup can never kill a reattached PTY.
       if (ptySessionsMap.get(ptySessionKey as string) !== session || session.ws !== null) {
         return;
       }
 
+      const idleFor = Date.now() - Math.max(detachedAt, session.lastOutputAt);
+      if (idleFor < PTY_IDLE_TIMEOUT) {
+        session.timeoutId = setTimeout(reclaimWhenIdle, PTY_IDLE_TIMEOUT - idleFor);
+        return;
+      }
+
       session.pty.kill();
       ptySessionsMap.delete(ptySessionKey as string);
-    }, PTY_SESSION_TIMEOUT);
+    };
+    session.timeoutId = setTimeout(reclaimWhenIdle, PTY_IDLE_TIMEOUT);
   });
 
   ws.on('error', (error) => {

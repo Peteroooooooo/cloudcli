@@ -27,7 +27,10 @@ export const useVersionCheck = (owner: string, repo: string) => {
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [releaseInfo, setReleaseInfo] = useState<ReleaseInfo | null>(null);
-  const [installMode, setInstallMode] = useState<InstallMode>('git');
+  // Null until `/health` answers. Releases are only checked for npm installs:
+  // a git checkout is this fork's own code, and comparing it with the upstream
+  // releases offered an "update" that switched the checkout to upstream main.
+  const [installMode, setInstallMode] = useState<InstallMode | null>(null);
   const [runningVersion, setRunningVersion] = useState<string | null>(null);
   const [restartRequired, setRestartRequired] = useState(false);
 
@@ -56,6 +59,10 @@ export const useVersionCheck = (owner: string, repo: string) => {
   }, []);
 
   useEffect(() => {
+    if (installMode !== 'npm') {
+      return undefined;
+    }
+
     const checkVersion = async () => {
       try {
         const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/releases/latest`);
@@ -93,7 +100,15 @@ export const useVersionCheck = (owner: string, repo: string) => {
     checkVersion();
     const interval = setInterval(checkVersion, 5 * 60 * 1000); // Check every 5 minutes
     return () => clearInterval(interval);
-  }, [owner, repo]);
+  }, [installMode, owner, repo]);
 
-  return { updateAvailable, latestVersion, currentVersion: APP_VERSION, releaseInfo, installMode, runningVersion, restartRequired };
+  return {
+    updateAvailable,
+    latestVersion,
+    currentVersion: APP_VERSION,
+    releaseInfo,
+    installMode: installMode ?? 'git',
+    runningVersion,
+    restartRequired,
+  };
 };

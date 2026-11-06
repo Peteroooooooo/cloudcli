@@ -303,9 +303,27 @@ function pruneRealtimeSupersededByServer(
 
   const serverIds = new Set(serverMessages.map((message) => message.id));
   const reconciledRealtimeMessages = removeOptimisticUserEchoes(serverMessages, realtimeMessages);
+  const newestServerTime = serverMessages.reduce(
+    (newest, message) => Math.max(newest, readMessageTime(message) ?? 0),
+    0,
+  );
 
   return reconciledRealtimeMessages.filter((message) => {
     if (serverIds.has(message.id)) {
+      return false;
+    }
+
+    // A live Codex tool row carries the CLI's per-turn item id (`item_3`),
+    // while the transcript names the same call by its call id, so neither the
+    // row id nor the tool id ever matches. The transcript is written in order,
+    // though: once it holds anything newer than the live row, the call is in
+    // it too.
+    if (
+      message.provider === 'codex'
+      && !message.parentToolUseId
+      && (message.kind === 'tool_use' || message.kind === 'tool_result')
+      && (readMessageTime(message) ?? Infinity) <= newestServerTime
+    ) {
       return false;
     }
 
@@ -546,6 +564,48 @@ const STALE_THRESHOLD_MS = 30_000;
 
 const MAX_REALTIME_MESSAGES = 500;
 
+/**
+ * Cap on rows a subagent or a background task streams. They are kept apart
+ * from the turn's own rows: an agent making hundreds of tool calls would
+ * otherwise push the user's prompt and the agent's own card out of view
+ * until the turn completes.
+ */
+const MAX_REALTIME_AUXILIARY_MESSAGES = 2000;
+
+function isAuxiliaryRealtimeMessage(message: NormalizedMessage): boolean {
+  return Boolean(message.parentToolUseId) || message.kind === 'task_status';
+}
+
+/** Drops the oldest rows of whichever kind is over its cap, keeping order. */
+function trimRealtimeMessages(messages: NormalizedMessage[]): NormalizedMessage[] {
+  let auxiliary = 0;
+  for (const message of messages) {
+    if (isAuxiliaryRealtimeMessage(message)) {
+      auxiliary++;
+    }
+  }
+  let excessAuxiliary = Math.max(0, auxiliary - MAX_REALTIME_AUXILIARY_MESSAGES);
+  let excessTopLevel = Math.max(0, messages.length - auxiliary - MAX_REALTIME_MESSAGES);
+  if (excessAuxiliary === 0 && excessTopLevel === 0) {
+    return messages;
+  }
+
+  return messages.filter((message) => {
+    if (isAuxiliaryRealtimeMessage(message)) {
+      if (excessAuxiliary > 0) {
+        excessAuxiliary--;
+        return false;
+      }
+      return true;
+    }
+    if (excessTopLevel > 0) {
+      excessTopLevel--;
+      return false;
+    }
+    return true;
+  });
+}
+
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
 export function useSessionStore() {
@@ -754,11 +814,19 @@ export function useSessionStore() {
       msg.sessionId === sessionId
         ? msg
         : { ...msg, sessionId };
-    let updated = [...slot.realtimeMessages, normalizedMessage];
-    if (updated.length > MAX_REALTIME_MESSAGES) {
-      updated = updated.slice(-MAX_REALTIME_MESSAGES);
+    // A provider resends an item under the same id as it progresses (a
+    // running command's output, a plan being checked off); the row it already
+    // has is replaced in place rather than drawn again.
+    const existingIndex = normalizedMessage.id
+      ? slot.realtimeMessages.findIndex((message) => message.id === normalizedMessage.id)
+      : -1;
+    if (existingIndex >= 0) {
+      const updated = [...slot.realtimeMessages];
+      updated[existingIndex] = normalizedMessage;
+      slot.realtimeMessages = updated;
+    } else {
+      slot.realtimeMessages = trimRealtimeMessages([...slot.realtimeMessages, normalizedMessage]);
     }
-    slot.realtimeMessages = updated;
     recomputeMergedIfNeeded(slot);
     notify(sessionId);
   }, [getSlot, notify]);

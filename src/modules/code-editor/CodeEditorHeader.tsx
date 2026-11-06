@@ -13,6 +13,7 @@ type CodeEditorHeaderProps = {
   markdownPreview: boolean;
   saving: boolean;
   saveSuccess: boolean;
+  canSave: boolean;
   hasUnsavedChanges: boolean;
   onToggleMarkdownPreview: () => void;
   onOpenHtmlPreview: () => void;
@@ -50,6 +51,7 @@ export default function CodeEditorHeader({
   markdownPreview,
   saving,
   saveSuccess,
+  canSave,
   hasUnsavedChanges,
   onToggleMarkdownPreview,
   onOpenHtmlPreview,
@@ -171,7 +173,7 @@ export default function CodeEditorHeader({
         <button
           type="button"
           onClick={onSave}
-          disabled={saving}
+          disabled={saving || !canSave}
           className={`flex items-center justify-center rounded-md p-1.5 transition-colors disabled:opacity-50 ${
             saveSuccess
               ? 'bg-green-50 text-green-600 dark:bg-green-900/30 dark:text-green-400'

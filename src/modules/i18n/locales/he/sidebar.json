@@ -125,10 +125,6 @@
     "createProjectError": "שגיאה ביצירת הפרויקט. יש לנסות שוב.",
     "updateProjectError": "שגיאה בעדכון הפרויקט. יש לנסות שוב.",
     "refreshError": "הרענון נכשל. יש לנסות שוב.",
-    "restoreProjectFailed": "שחזור הפרויקט נכשל. יש לנסות שוב.",
-    "restoreProjectError": "שגיאה בשחזור הפרויקט. יש לנסות שוב.",
-    "restoreSessionFailed": "שחזור הסשן נכשל. יש לנסות שוב.",
-    "restoreSessionError": "שגיאה בשחזור הסשן. יש לנסות שוב.",
     "forkSessionError": "לא ניתן לפצל (fork) את הסשן. יש לנסות שוב.",
     "deleteSessionsPartialFailure_one": "סשן אחד מתוך {{total}} לא נמחק. יש לנסות שוב.",
     "deleteSessionsPartialFailure_two": "שני סשנים מתוך {{total}} לא נמחקו. יש לנסות שוב.",
@@ -143,10 +139,8 @@
     "modeConversations": "שיחות",
     "modeMore": "עוד",
     "runningTooltip": "סשנים פועלים",
-    "archiveOnlyTooltip": "ארכיון בלבד",
     "conversationsPlaceholder": "חיפוש בשיחות...",
     "runningPlaceholder": "חיפוש בסשנים פועלים...",
-    "archivedPlaceholder": "חיפוש בסשנים בארכיון...",
     "searching": "מחפש...",
     "sessionTitles": "סשן",
     "conversationContents": "תוכן השיחות",
@@ -173,20 +167,6 @@
     "emptyDescription": "עבודה פעילה תופיע כאן בזמן שספק מעבד בקשה.",
     "noMatchingSessions": "אין סשנים פועלים שתואמים לחיפוש."
   },
-  "archived": {
-    "title": "ארכיון",
-    "restoreHint": "אפשר לשחזר פריטים בכל עת",
-    "loadingTitle": "טוען ארכיון...",
-    "loadingDescription": "טוען סביבות עבודה וסשנים מוסתרים שאפשר לשחזר בהמשך.",
-    "emptyTitle": "אין פריטים בארכיון",
-    "emptyDescription": "סביבות עבודה וסשנים יופיעו כאן אחרי שמסתירים אותם מהרשימה הפעילה.",
-    "noMatchingSessions": "אין פריטים תואמים בארכיון",
-    "tryDifferentSearch": "כדאי לנסות מונח חיפוש אחר.",
-    "restoreAction": "שחזור",
-    "restoreProject": "שחזור סביבת עבודה",
-    "restore": "שחזור סשן",
-    "deletePermanently": "מחיקה לצמיתות"
-  },
   "deleteConfirmation": {
     "deleteProject": "הסרת פרויקט",
     "deleteSession": "מחיקת סשן",
@@ -195,10 +175,6 @@
     "sessionCount_two": "הפרויקט מכיל שתי שיחות.",
     "sessionCount_other": "הפרויקט מכיל {{count}} שיחות.",
     "removeFromSidebar": "הסרה מסרגל הצד בלבד",
-    "archiveProject": "העברת הפרויקט לארכיון",
-    "archiveSession": "העברת הסשן לארכיון",
-    "archiveSessionNotice": "העברה לארכיון מוציאה את הסשן מהרשימה הפעילה ושומרת את ההיסטוריה שלו.",
-    "archivedSessionNotice": "הסשן הזה כבר בארכיון. אפשר להשאיר אותו מוסתר או למחוק אותו לצמיתות.",
     "deleteSessionPermanently": "מחיקה לצמיתות",
     "deleteAllData": "מחיקת כל הנתונים לצמיתות",
     "allConversationsDeleted": "הפרויקט יוסר מסרגל הצד. הקבצים, הזיכרונות ונתוני הסשנים יישמרו.",
@@ -209,12 +185,6 @@
     "deleteSessions_other": "מחיקת {{count}} סשנים",
     "selectedSessions_one": "סשן נבחר אחד",
     "selectedSessions_two": "שני סשנים נבחרים",
-    "selectedSessions_other": "{{count}} סשנים נבחרים",
-    "archiveSessions_one": "העברת סשן אחד לארכיון",
-    "archiveSessions_two": "העברת שני סשנים לארכיון",
-    "archiveSessions_other": "העברת {{count}} סשנים לארכיון",
-    "archiveSessionsNotice_one": "העברה לארכיון מוציאה את הסשן מהרשימה הפעילה ושומרת את ההיסטוריה שלו.",
-    "archiveSessionsNotice_two": "העברה לארכיון מוציאה את הסשנים מהרשימה הפעילה ושומרת את ההיסטוריה שלהם.",
-    "archiveSessionsNotice_other": "העברה לארכיון מוציאה את הסשנים מהרשימה הפעילה ושומרת את ההיסטוריה שלהם."
+    "selectedSessions_other": "{{count}} סשנים נבחרים"
   }
 }

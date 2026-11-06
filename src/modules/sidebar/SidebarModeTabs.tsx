@@ -1,5 +1,5 @@
 import { Fragment } from 'react';
-import { Activity, Archive, Folder, MessageSquare, MoreHorizontal } from 'lucide-react';
+import { Activity, Folder, MessageSquare, MoreHorizontal } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
@@ -27,8 +27,8 @@ type SidebarModeTabsProps = {
  * Used by SidebarHeader for the section strip above the search box, in both the
  * desktop and the mobile header.
  *
- * The sidebar is resizable, so the strip cannot assume it has room for all four
- * tabs: the ones that no longer fit move into a "…" dropdown at its right edge
+ * The sidebar is resizable, so the strip cannot assume it has room for all
+ * three tabs: the ones that no longer fit move into a "…" dropdown at its right edge
  * instead of spilling out over the panel.
  */
 export default function SidebarModeTabs({
@@ -41,7 +41,6 @@ export default function SidebarModeTabs({
     { mode: 'projects', label: t('search.modeProjects'), icon: Folder, showLabel: true },
     { mode: 'conversations', label: t('search.modeConversations'), icon: MessageSquare, showLabel: true },
     { mode: 'running', label: t('search.runningTooltip', 'Running sessions'), icon: Activity, showLabel: false },
-    { mode: 'archived', label: t('search.archiveOnlyTooltip', 'Archive only'), icon: Archive, showLabel: false },
   ];
 
   const activeIndex = tabs.findIndex((tab) => tab.mode === searchMode);
@@ -62,7 +61,6 @@ export default function SidebarModeTabs({
         title={tab.showLabel ? undefined : tab.label}
         className={cn(
           'flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-normal transition-all',
-          tab.mode === 'archived' && 'px-2.5',
           canGrow && tab.showLabel && 'flex-1',
           isActive
             ? 'bg-background text-foreground shadow-sm'

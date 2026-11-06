@@ -91,7 +91,7 @@ test.each<LLMProvider>(['claude', 'codex'])('mobile offers a fork for a supporte
 
   assert.ok(sheet.getByRole('button', { name: /Fork session/ }));
   assert.ok(sheet.getByRole('button', { name: 'Rename session' }));
-  assert.ok(sheet.getByRole('button', { name: 'Archive or delete session' }));
+  assert.ok(sheet.getByRole('button', { name: 'Delete session' }));
 });
 
 test('forking from the mobile sheet passes the owning session once and dismisses the sheet', async () => {

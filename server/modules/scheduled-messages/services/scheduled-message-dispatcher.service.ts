@@ -16,6 +16,14 @@ const POLL_INTERVAL_MS = 30_000;
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let dispatchInFlight = false;
+/** Asks for a pass soon. A no-op until the dispatcher is initialized. */
+let requestDispatchPass: () => void = () => {};
+let stopRunCompletedListener: (() => void) | null = null;
+/**
+ * Sessions running a turn a scheduled message started. Their next due message
+ * waits for that turn instead of interrupting it.
+ */
+const scheduledRunsInFlight = new Set<string>();
 
 function readOptions(raw: string): Record<string, unknown> {
   try {
@@ -99,6 +107,18 @@ async function sendClaimedMessage(
   row: ScheduledMessageRow,
   runtime: ProviderRuntimeGateway,
 ): Promise<void> {
+  // Recorded rather than retried, and recorded whether the run never started
+  // (deleted session, unavailable provider) or started and then failed.
+  // Silently dropping a message the user scheduled is worse than telling
+  // them it did not go.
+  const settle = (error: string | null) => {
+    if (error) {
+      recordFailure(row, error);
+    }
+    scheduledRunsInFlight.delete(row.session_id);
+    requestDispatchPass();
+  };
+
   try {
     const result = await runDetachedChatTurn(
       {
@@ -114,21 +134,28 @@ async function sendClaimedMessage(
       { runtime },
     );
 
-    // Recorded rather than retried, and recorded whether the run never started
-    // (deleted session, unavailable provider) or started and then failed.
-    // Silently dropping a message the user scheduled is worse than telling
-    // them it did not go.
-    if (!result.started || result.error) {
-      recordFailure(row, result.error ?? 'The session was unavailable when this was due.');
+    if (!result.started || result.error || !result.finished) {
+      settle(result.error ?? (result.started ? null : 'The session was unavailable when this was due.'));
+      return;
     }
+    // Only the start is waited for; a long turn must not hold up other
+    // sessions' messages. How it ends is recorded when it does.
+    void result.finished.then(
+      (outcome) => settle(outcome.error),
+      (error: unknown) => settle(error instanceof Error ? error.message : String(error)),
+    );
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    recordFailure(row, message);
+    settle(error instanceof Error ? error.message : String(error));
   }
 }
 
 /**
- * Sends every message whose time has come.
+ * Sends every message whose time has come, one per session per pass.
+ *
+ * A session takes one run at a time, and a second message due for it must not
+ * interrupt the turn the first one started, so the next one waits for the pass
+ * that follows that turn's end. Each message is claimed right before its turn
+ * starts, never in a batch ahead of it.
  *
  * Exported so a test can drive one pass without waiting on the timer.
  */
@@ -136,26 +163,27 @@ export async function dispatchDueScheduledMessages(
   runtime: ProviderRuntimeGateway,
   now: Date = new Date(),
 ): Promise<number> {
-  // Claimed before any of them runs, so a long turn cannot let the next poll
-  // pick the same message up again.
-  const due = scheduledMessagesDb.claimDue(now);
-  if (due.length === 0) {
-    return 0;
+  const nextBySession = new Map<string, ScheduledMessageRow>();
+  for (const row of scheduledMessagesDb.listDue(now)) {
+    if (!nextBySession.has(row.session_id)) {
+      nextBySession.set(row.session_id, row);
+    }
   }
 
-  // The claim already recorded them as sent, so their banners come down now,
-  // as the turns start, rather than once the last turn has finished.
-  for (const sessionId of new Set(due.map((row) => row.session_id))) {
-    announceScheduledMessagesChanged(sessionId);
-  }
-
-  // Sequentially: a session can only have one run at a time, and two due
-  // messages for the same session must not race each other into it.
-  for (const row of due) {
+  let claimed = 0;
+  await Promise.all([...nextBySession.values()].map(async (row) => {
+    if (scheduledRunsInFlight.has(row.session_id) || !scheduledMessagesDb.claim(row.id)) {
+      return;
+    }
+    scheduledRunsInFlight.add(row.session_id);
+    claimed += 1;
+    // The claim recorded it as sent, so its banner comes down now, as the
+    // turn starts, rather than once the turn has finished.
+    announceScheduledMessagesChanged(row.session_id);
     await sendClaimedMessage(row, runtime);
-  }
+  }));
 
-  return due.length;
+  return claimed;
 }
 
 /**
@@ -163,17 +191,22 @@ export async function dispatchDueScheduledMessages(
  *
  * The schedule lives in the database, so a message stays scheduled across a
  * restart and one that came due while the server was down is sent on the first
- * poll after it comes back, rather than being skipped.
+ * poll after it comes back, rather than being skipped. A pass also runs
+ * whenever a turn ends, so a follow-up queued behind it does not wait for the
+ * next poll.
  */
 export function initializeScheduledMessageDispatcher(runtime: ProviderRuntimeGateway): void {
   if (pollTimer) {
     return;
   }
 
+  let passRequested = false;
   const poll = () => {
-    // A pass that overruns the interval must not be started again underneath
-    // itself; the claim is transactional but the runs are not.
+    // A pass that overruns must not be started again underneath itself; the
+    // claims are atomic but the busy checks are not. One requested meanwhile
+    // runs as soon as it ends.
     if (dispatchInFlight) {
+      passRequested = true;
       return;
     }
     dispatchInFlight = true;
@@ -185,8 +218,19 @@ export function initializeScheduledMessageDispatcher(runtime: ProviderRuntimeGat
       })
       .finally(() => {
         dispatchInFlight = false;
+        if (passRequested) {
+          passRequested = false;
+          poll();
+        }
       });
   };
+
+  // Deferred: a turn's `complete` goes out before the runtime decides whether
+  // to hold its process open for background work, which the pass checks.
+  requestDispatchPass = () => {
+    setImmediate(poll);
+  };
+  stopRunCompletedListener = chatRunRegistry.onRunCompleted(() => requestDispatchPass());
 
   pollTimer = setInterval(poll, POLL_INTERVAL_MS);
   // Never keep the process alive just to poll for scheduled messages.
@@ -201,4 +245,7 @@ export function closeScheduledMessageDispatcher(): void {
     clearInterval(pollTimer);
     pollTimer = null;
   }
+  stopRunCompletedListener?.();
+  stopRunCompletedListener = null;
+  requestDispatchPass = () => {};
 }

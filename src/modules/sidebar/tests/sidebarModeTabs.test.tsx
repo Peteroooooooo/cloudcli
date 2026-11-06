@@ -18,7 +18,6 @@ const LABELS: Record<string, string> = {
   'search.modeProjects': 'Projects',
   'search.modeConversations': 'Conversations',
   'search.runningTooltip': 'Running sessions',
-  'search.archiveOnlyTooltip': 'Archive only',
   'search.modeMore': 'More',
 };
 
@@ -54,8 +53,16 @@ test('a wide row shows every tab and no overflow menu', () => {
   assert.ok(screen.getByRole('button', { name: 'Projects' }));
   assert.ok(screen.getByRole('button', { name: 'Conversations' }));
   assert.ok(screen.getByRole('button', { name: 'Running sessions' }));
-  assert.ok(screen.getByRole('button', { name: 'Archive only' }));
   assert.equal(screen.queryByRole('button', { name: 'More' }), null);
+});
+
+test('there is no archive section to switch to', () => {
+  renderTabs(400, 'projects');
+
+  assert.deepEqual(
+    screen.getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent?.trim()),
+    ['Projects', 'Conversations', 'Running sessions'],
+  );
 });
 
 test('a narrow row moves the tabs that no longer fit into the dropdown', () => {
@@ -66,19 +73,18 @@ test('a narrow row moves the tabs that no longer fit into the dropdown', () => {
 
   fireEvent.click(screen.getByRole('button', { name: 'More' }));
   assert.ok(screen.getByRole('menuitem', { name: 'Running sessions' }));
-  assert.ok(screen.getByRole('menuitem', { name: 'Archive only' }));
 
   fireEvent.click(screen.getByRole('menuitem', { name: 'Conversations' }));
   assert.deepEqual(changes, ['conversations']);
 });
 
 test('the section on screen keeps its place in the row', () => {
-  renderTabs(220, 'archived');
+  renderTabs(220, 'running');
 
-  // Archive is the last tab and the first to be dropped on width alone, but it
+  // Running is the last tab and the first to be dropped on width alone, but it
   // is the open section, so the strip has to keep showing it as pressed.
-  const archive = screen.getByRole('button', { name: 'Archive only' });
-  assert.equal(archive.getAttribute('aria-pressed'), 'true');
+  const running = screen.getByRole('button', { name: 'Running sessions' });
+  assert.equal(running.getAttribute('aria-pressed'), 'true');
   assert.equal(screen.queryByRole('button', { name: 'Conversations' }), null);
   assert.ok(screen.getByRole('button', { name: 'More' }));
 });

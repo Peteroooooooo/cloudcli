@@ -22,6 +22,7 @@ import {
   createNormalizedMessage,
 } from '@/shared/index.js';
 import { notifyRunFailed, notifyRunStopped } from '@/modules/notifications/index.js';
+import { truncateOutput } from '@/shared/message-unification.js';
 import type { AnyRecord, ProviderRuntimeContext, ProviderRuntimeWriter } from '@/shared/index.js';
 
 type ActiveCodexSession = {
@@ -317,8 +318,19 @@ async function queryCodex(
   // Session-map key: the app session id when the caller supplied one, else
   // the provider-native thread id once captured (legacy/direct API callers).
   const sessionKey = () => sessionId || capturedSessionId || null;
+  // This run's map entry. Read directly rather than through the map, which by
+  // the time this run winds down may hold the session's next run.
+  let runEntry: ActiveCodexSession | null = null;
 
   try {
+    // A stop that arrived while the run was being set up found no entry to
+    // abort. Past this point the entry exists and the signal is linked to it.
+    const stopSignal = options.stopSignal as AbortSignal | undefined;
+    if (stopSignal?.aborted) {
+      notifyCodexRunAborted();
+      return;
+    }
+
     codex = new Codex();
 
     const threadOptions: ThreadOptions = {
@@ -336,22 +348,31 @@ async function queryCodex(
       thread = codex.startThread(threadOptions);
     }
 
+    // One entry per run. It is filed again under the provider id once that is
+    // known (legacy callers without an app id), and must stay the same object:
+    // a fresh one would forget an abort that already landed.
+    runEntry = {
+      thread,
+      codex,
+      status: 'running',
+      abortController,
+      startedAt: new Date().toISOString()
+    };
     const registerSession = (id: string | null) => {
-      if (!id) {
-        return;
+      if (id && runEntry) {
+        activeCodexSessions.set(id, runEntry);
       }
-      activeCodexSessions.set(id, {
-        thread,
-        codex,
-        status: 'running',
-        abortController,
-        startedAt: new Date().toISOString()
-      });
     };
 
     if (sessionKey()) {
       registerSession(sessionKey());
     }
+    stopSignal?.addEventListener('abort', () => {
+      if (runEntry?.status === 'running') {
+        runEntry.status = 'aborted';
+        abortController.abort();
+      }
+    }, { once: true });
 
     // Execute with streaming. Turns with image attachments send structured
     // input items so Codex reads the images from their local asset paths.
@@ -387,21 +408,18 @@ async function queryCodex(
       }
 
       // Check if session was aborted
-      if (abortController.signal.aborted) {
+      if (abortController.signal.aborted || runEntry.status === 'aborted') {
         break;
       }
-      if (sessionKey()) {
-        const session = activeCodexSessions.get(sessionKey() || '');
-        if (session?.status === 'aborted') {
-          break;
-        }
-      }
 
-      // Progress events used to be dropped, so a long shell command or a
-      // growing plan showed nothing until it finished. They are forwarded now;
-      // every item carries a stable id, so the client replaces the row it
-      // already has rather than stacking a new one per tick. Text items are
-      // still skipped mid-flight because assistant prose arrives through the
+      // `item.started`/`item.updated` of a running command, MCP call or plan
+      // repeat the item id the `item.completed` will carry, so the client
+      // store replaces its row on each tick instead of stacking new ones. That
+      // id is the CLI's per-process counter (`item_0`, `item_1`, ...), not the
+      // call id the rollout records, so the history refresh after `complete`
+      // cannot match on it; the client drops a turn's live Codex tool rows once
+      // the persisted transcript reaches past them. Text items are still
+      // skipped mid-flight because assistant prose arrives through the
       // separate streaming path.
       if (
         (event.type === 'item.started' || event.type === 'item.updated')
@@ -418,6 +436,11 @@ async function queryCodex(
       // Normalize the transformed event into NormalizedMessage(s) via adapter
       const normalizedMsgs = context.normalizeMessage(transformed, capturedSessionId || sessionId || null);
       for (const msg of normalizedMsgs) {
+        // Same cap as history: a command's whole output is resent on every
+        // progress tick, to every watching socket and into the replay buffer.
+        if (msg.kind === 'tool_result' && typeof msg.content === 'string') {
+          msg.content = truncateOutput(msg.content);
+        }
         sendMessage(ws, msg);
       }
 
@@ -445,8 +468,7 @@ async function queryCodex(
 
     // Send the terminal completion event — skipped for aborted runs, whose
     // terminal `complete` (aborted: true) was already sent by abort-session.
-    const runSession = activeCodexSessions.get(sessionKey() || '');
-    const runAborted = runSession?.status === 'aborted' || abortController.signal.aborted;
+    const runAborted = runEntry.status === 'aborted' || abortController.signal.aborted;
     if (!runAborted) {
       sendMessage(ws, createCompleteMessage({
         provider: 'codex',
@@ -468,7 +490,7 @@ async function queryCodex(
     }
 
   } catch (error) {
-    const session = activeCodexSessions.get(sessionKey() || '');
+    const session = runEntry;
     const runError = error instanceof Error ? error : new Error(String(error));
     const wasAborted =
       session?.status === 'aborted' ||
@@ -509,11 +531,16 @@ async function queryCodex(
     }
 
   } finally {
-    // Update session status
-    if (sessionKey()) {
-      const session = activeCodexSessions.get(sessionKey() || '');
-      if (session) {
-        session.status = session.status === 'aborted' ? 'aborted' : 'completed';
+    // The entry goes with the run, and only this run's: a later turn of the
+    // session may already have filed its own under the same key.
+    if (runEntry) {
+      if (runEntry.status === 'running') {
+        runEntry.status = 'completed';
+      }
+      for (const [key, entry] of activeCodexSessions) {
+        if (entry === runEntry) {
+          activeCodexSessions.delete(key);
+        }
       }
     }
   }
@@ -527,7 +554,7 @@ async function queryCodex(
 function abortCodexSession(sessionId: string) {
   const session = activeCodexSessions.get(sessionId);
 
-  if (!session) {
+  if (!session || session.status === 'completed') {
     return false;
   }
 
@@ -565,22 +592,3 @@ function sendMessage(ws: ProviderRuntimeWriter, data: unknown) {
     console.error('[Codex] Error sending message:', error);
   }
 }
-
-// Clean up old completed sessions periodically
-const completedSessionCleanupTimer = setInterval(() => {
-  const now = Date.now();
-  const maxAge = 30 * 60 * 1000; // 30 minutes
-
-  for (const [id, session] of activeCodexSessions.entries()) {
-    if (session.status !== 'running') {
-      const startedAt = new Date(session.startedAt).getTime();
-      if (now - startedAt > maxAge) {
-        activeCodexSessions.delete(id);
-      }
-    }
-  }
-}, 5 * 60 * 1000); // Every 5 minutes
-
-// Runtime cleanup should not keep focused tests or one-off scripts alive after
-// their provider work has completed.
-completedSessionCleanupTimer.unref?.();

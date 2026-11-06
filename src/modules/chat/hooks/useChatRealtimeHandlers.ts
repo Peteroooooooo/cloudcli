@@ -16,6 +16,13 @@ const hasActionablePermissionRequests = (requests: Array<{ toolName?: unknown }>
   return Array.isArray(requests) && requests.some((request) => isActionablePermissionRequest(request));
 };
 
+/**
+ * Where this client is in a session's live stream: the run it last heard from
+ * and the highest `seq` of that run it applied. Every run numbers its events
+ * from 1, so a `seq` means nothing without the run it belongs to.
+ */
+export type LiveSeqCursor = { runId: string | null; seq: number };
+
 type UseChatRealtimeHandlersArgs = {
   isActive: boolean;
   subscribe: (listener: (event: ServerEvent) => void) => () => void;
@@ -28,12 +35,13 @@ type UseChatRealtimeHandlersArgs = {
   streamTimerRef: MutableRefObject<number | null>;
   accumulatedStreamRef: MutableRefObject<string>;
   /**
-   * Highest live `seq` observed per session. Essential for reconnect catch-up:
-   * `chat.subscribe` sends this value as `lastSeq` so the server replays only
-   * the events this client actually missed. Written here on every sequenced
-   * frame; read wherever a `chat.subscribe` is sent (session open, reconnect).
+   * Live-stream position per session. Essential for reconnect catch-up:
+   * `chat.subscribe` sends it so the server replays only the events this
+   * client actually missed, and an event at or below it is a replay of one
+   * already applied. Written here on every sequenced frame; read wherever a
+   * `chat.subscribe` is sent.
    */
-  lastSeqRef: MutableRefObject<Map<string, number>>;
+  lastSeqRef: MutableRefObject<Map<string, LiveSeqCursor>>;
   /** When each session's `chat.subscribe` was last sent; guards stale idle acks. */
   statusCheckSentAtRef: MutableRefObject<Map<string, number>>;
   onSessionProcessing?: MarkSessionProcessing;
@@ -115,11 +123,19 @@ export function useChatRealtimeHandlers({
       const activeViewSessionId = activeViewSessionIdRef.current;
       const sid = (typeof msg.sessionId === 'string' && msg.sessionId) || activeViewSessionId;
 
-      // Record replay progress for every sequenced live event.
+      // Record replay progress for every sequenced live event, and drop one
+      // this client already applied: a reconnect replays from the position it
+      // sent, and a second subscribe would replay the same tail again.
       if (sid && typeof msg.seq === 'number') {
-        const known = lastSeqRef.current.get(sid) ?? 0;
-        if (msg.seq > known) {
-          lastSeqRef.current.set(sid, msg.seq);
+        const runId = typeof msg.runId === 'string' ? msg.runId : null;
+        const known = lastSeqRef.current.get(sid);
+        if (known && known.runId === runId) {
+          if (msg.seq <= known.seq) {
+            return;
+          }
+          known.seq = msg.seq;
+        } else {
+          lastSeqRef.current.set(sid, { runId, seq: msg.seq });
         }
       }
 
@@ -143,6 +159,11 @@ export function useChatRealtimeHandlers({
           // pending tool-permission prompts for the run.
           if (!sid) return;
 
+          // The server replays from the start of a run this client has not
+          // heard from, so its position in that run starts over.
+          if (typeof msg.runId === 'string' && lastSeqRef.current.get(sid)?.runId !== msg.runId) {
+            lastSeqRef.current.set(sid, { runId: msg.runId, seq: 0 });
+          }
           if (msg.isProcessing) {
             onSessionProcessing?.(sid);
           } else {

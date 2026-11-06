@@ -64,6 +64,7 @@ export function createCliApplication() {
     applicationRoot: ${JSON.stringify(fixtureRoot)},
     defaultDatabasePath: ${JSON.stringify(fixtureDatabasePath)},
     homeDirectory: ${JSON.stringify(fixtureRoot)},
+    installMode: 'npm',
     packageMetadata: { version: '1.0.0' },
     environment: process.env,
     fileSystem: {

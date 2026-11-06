@@ -118,10 +118,6 @@
     "createProjectError": "Erro ao criar projeto. Tente novamente.",
     "updateProjectError": "Erro ao atualizar projeto. Tente novamente.",
     "refreshError": "Falha ao atualizar. Tente novamente.",
-    "restoreProjectFailed": "Falha ao restaurar projeto. Tente novamente.",
-    "restoreProjectError": "Erro ao restaurar projeto. Tente novamente.",
-    "restoreSessionFailed": "Falha ao restaurar sessão. Tente novamente.",
-    "restoreSessionError": "Erro ao restaurar sessão. Tente novamente.",
     "forkSessionError": "Não foi possível fazer fork desta sessão. Tente novamente.",
     "deleteSessionsPartialFailure_one": "{{count}} sessão de {{total}} não pôde ser excluída. Tente novamente.",
     "deleteSessionsPartialFailure_other": "{{count}} de {{total}} sessões não puderam ser excluídas. Tente novamente.",
@@ -164,10 +160,6 @@
     "sessionCount_other": "Este projeto contém {{count}} conversas.",
     "sessionCount_many": "Este projeto contém {{count}} de conversas.",
     "removeFromSidebar": "Remover apenas da barra lateral",
-    "archiveProject": "Arquivar projeto",
-    "archiveSession": "Arquivar sessão",
-    "archiveSessionNotice": "Arquivar mantém a sessão fora da lista ativa preservando seu histórico.",
-    "archivedSessionNotice": "Esta sessão já está arquivada. Você pode mantê-la oculta ou excluí-la permanentemente.",
     "deleteSessionPermanently": "Excluir permanentemente",
     "deleteAllData": "Excluir todos os dados permanentemente",
     "allConversationsDeleted": "O projeto será removido da barra lateral. Seus arquivos, memórias e dados de sessão serão preservados.",
@@ -178,12 +170,6 @@
     "deleteSessions_many": "Excluir {{count}} de sessões",
     "selectedSessions_one": "{{count}} sessão selecionada",
     "selectedSessions_other": "{{count}} sessões selecionadas",
-    "selectedSessions_many": "{{count}} de sessões selecionadas",
-    "archiveSessions_one": "Arquivar {{count}} sessão",
-    "archiveSessions_other": "Arquivar {{count}} sessões",
-    "archiveSessions_many": "Arquivar {{count}} de sessões",
-    "archiveSessionsNotice_one": "Arquivar mantém a sessão fora da lista ativa preservando seu histórico.",
-    "archiveSessionsNotice_other": "Arquivar mantém as sessões fora da lista ativa preservando seu histórico.",
-    "archiveSessionsNotice_many": "Arquivar mantém as sessões fora da lista ativa preservando seu histórico."
+    "selectedSessions_many": "{{count}} de sessões selecionadas"
   }
 }

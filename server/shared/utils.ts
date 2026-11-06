@@ -304,7 +304,13 @@ export async function resolvePathUnderRoots(targetPath: string, roots: string[])
       continue;
     }
 
-    if (resolvedPath === resolvedRoot || resolvedPath.startsWith(`${resolvedRoot}${path.sep}`)) {
+    // `path.relative` compares case-insensitively on win32 and handles a root
+    // that is a whole drive (`D:\`), where `${root}${sep}` would be `D:\\`.
+    const relativePath = path.relative(resolvedRoot, resolvedPath);
+    if (
+      relativePath === ''
+      || (relativePath !== '..' && !relativePath.startsWith(`..${path.sep}`) && !path.isAbsolute(relativePath))
+    ) {
       return resolvedPath;
     }
   }
@@ -1228,6 +1234,27 @@ export function sanitizeLeafDirectoryName(inputName: string, label = 'directory 
 
 // ---------------------------
 //----------------- SESSION SYNCHRONIZER FILESYSTEM HELPERS ------------
+type FindChangedFilesOptions = {
+  /**
+   * Transcript paths the index already holds. A file that is not among them is
+   * returned whatever its times say: a transcript moved back into place, such
+   * as a Codex thread unarchived, keeps the modified time it had before.
+   */
+  indexedPaths?: Iterable<string>;
+  /** Directory names that are never descended into. */
+  skipDirectoryNames?: ReadonlySet<string>;
+};
+
+/**
+ * One spelling per transcript path, for comparing paths from different
+ * sources: Codex's app-server reports Windows paths with the `\\?\` prefix,
+ * and Windows paths are case-insensitive.
+ */
+export function toTranscriptPathKey(filePath: string): string {
+  const normalized = path.normalize(filePath.replace(/^\\\\\?\\/, ''));
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+}
+
 /**
  * Recursively discovers files that match one extension, with optional incremental filtering.
  *
@@ -1236,22 +1263,37 @@ export function sanitizeLeafDirectoryName(inputName: string, label = 'directory 
  * after the previous scan, or pass `null` to perform a full rescan. Written
  * files count too: a conversation continued or renamed in the CLI while this
  * server was stopped only changes an existing file, and the watcher never sees
- * changes made before it started. Missing directories are treated as empty
+ * changes made before it started. With `indexedPaths`, files missing from the
+ * index are included as well. Missing directories are treated as empty
  * because not every provider exists on every machine.
  */
 export async function findFilesRecursivelyChangedAfter(
   rootDir: string,
   extension: string,
   lastScanAt: Date | null,
-  fileList: string[] = []
+  options: FindChangedFilesOptions = {},
 ): Promise<string[]> {
-  try {
-    const entries = await readdir(rootDir, { withFileTypes: true });
+  const indexedKeys = options.indexedPaths
+    ? new Set(Array.from(options.indexedPaths, toTranscriptPathKey))
+    : null;
+  const fileList: string[] = [];
+
+  const visit = async (directory: string): Promise<void> => {
+    let entries: fs.Dirent[];
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch {
+      // Missing provider folders are expected in first-run or partial setups.
+      return;
+    }
+
     for (const entry of entries) {
-      const fullPath = path.join(rootDir, entry.name);
+      const fullPath = path.join(directory, entry.name);
 
       if (entry.isDirectory()) {
-        await findFilesRecursivelyChangedAfter(fullPath, extension, lastScanAt, fileList);
+        if (!options.skipDirectoryNames?.has(entry.name)) {
+          await visit(fullPath);
+        }
         continue;
       }
 
@@ -1259,20 +1301,26 @@ export async function findFilesRecursivelyChangedAfter(
         continue;
       }
 
-      if (!lastScanAt) {
+      if (!lastScanAt || (indexedKeys && !indexedKeys.has(toTranscriptPathKey(fullPath)))) {
         fileList.push(fullPath);
         continue;
       }
 
-      const fileStat = await stat(fullPath);
-      if (fileStat.birthtime > lastScanAt || fileStat.mtime > lastScanAt) {
+      try {
+        const fileStat = await stat(fullPath);
+        if (fileStat.birthtime > lastScanAt || fileStat.mtime > lastScanAt) {
+          fileList.push(fullPath);
+        }
+      } catch {
+        // Handed to the synchronizer anyway: the scan cursor moves past this
+        // pass, so a file skipped here would not be looked at again until it
+        // next changes. A file that is really gone fails to parse and is skipped.
         fileList.push(fullPath);
       }
     }
-  } catch {
-    // Missing provider folders are expected in first-run or partial setups.
-  }
+  };
 
+  await visit(rootDir);
   return fileList;
 }
 

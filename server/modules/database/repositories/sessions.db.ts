@@ -795,6 +795,26 @@ export const sessionsDb = {
   },
 
   /**
+   * Every transcript path one provider's rows account for: the ones sessions
+   * read from and the ones they were edited off. A synchronizer reads any other
+   * transcript on its next scan, however old the file is.
+   */
+  getTranscriptPathsByProvider(provider: string): string[] {
+    const db = getConnection();
+    const rows = db
+      .prepare(
+        `SELECT jsonl_path FROM sessions
+         WHERE provider = ? AND jsonl_path IS NOT NULL AND jsonl_path <> ''
+         UNION
+         SELECT jsonl_path FROM superseded_provider_sessions
+         WHERE provider = ? AND jsonl_path IS NOT NULL AND jsonl_path <> ''`
+      )
+      .all(provider, provider) as Array<{ jsonl_path: string }>;
+
+    return rows.map((row) => row.jsonl_path);
+  },
+
+  /**
    * Every row of one provider with the name it shows, archived ones included.
    * Used to apply names a provider keeps in an index of its own.
    */

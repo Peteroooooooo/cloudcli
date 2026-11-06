@@ -184,7 +184,7 @@ export default function SessionOptions({
             }] : []),
             ...(canDelete && !isProcessing ? [{
               key: 'delete',
-              label: 'Archive or delete session',
+              label: 'Delete session',
               icon: Trash2,
               isDanger: true,
               showDividerBefore: true,

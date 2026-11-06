@@ -230,7 +230,6 @@ export const api = {
   // first, for refetches that only change what is shown.
   projects: ({ provider = 'all', skipSync = false }: { provider?: SessionProviderFilter; skipSync?: boolean } = {}) =>
     get(`/api/projects${query({ provider: providerQueryValue(provider), skipSync: skipSync ? 1 : null })}`),
-  archivedProjects: () => get('/api/projects/archived'),
   projectSessions: (
     projectId: string,
     { limit = 20, offset = 0, provider = 'all' }: { limit?: number; offset?: number; provider?: SessionProviderFilter } = {},
@@ -244,11 +243,10 @@ export const api = {
     get(`/api/projects/${encodeURIComponent(projectId)}/taskmaster`),
   renameProject: (projectId: string, displayName: string) =>
     put(`/api/projects/${projectId}/rename`, { displayName }),
-  restoreProject: (projectId: string) =>
-    post(`/api/projects/${encodeURIComponent(projectId)}/restore`),
-  // `hardDelete` => server `?force=true` (remove DB row + Claude *.jsonl + sessions rows for path).
-  deleteProject: (projectId: string, hardDelete = false) =>
-    del(`/api/projects/${projectId}${query({ force: hardDelete })}`),
+  // Erases every session of the project from its agent, then the project row.
+  // The server's non-force delete archives instead; nothing in the app offers that.
+  deleteProject: (projectId: string) =>
+    del(`/api/projects/${projectId}${query({ force: true })}`),
   createProject: (projectData: unknown) => post('/api/projects/create-project', projectData),
   migrateLegacyProjectStars: (projectIds: string[]) =>
     post('/api/projects/migrate-legacy-stars', { projectIds }),
@@ -277,14 +275,12 @@ export const api = {
 
   // Session endpoints. Provider/project metadata are resolved by the backend
   // from the session id.
-  // Session deletion mirrors project deletion:
-  // - default: archive only (`isArchived = 1`)
-  // - hardDelete: remove the row and, by default, its persisted transcript file
-  deleteSession: (sessionId: string, hardDelete = false) =>
-    del(`/api/providers/sessions/${sessionId}${query({ force: hardDelete })}`),
-  getArchivedSessions: () => get('/api/providers/sessions/archived'),
-  // Sessions idle for at least `olderThanDays` days, archived ones included;
-  // starred projects and running sessions are left out by the server.
+  // Erases the session from its agent (transcript, Codex thread) and deletes
+  // its row. As with projects, the non-force delete would archive instead.
+  deleteSession: (sessionId: string) =>
+    del(`/api/providers/sessions/${sessionId}${query({ force: true })}`),
+  // Sessions idle for at least `olderThanDays` days; starred projects and
+  // running sessions are left out by the server.
   staleSessions: (olderThanDays = 7) =>
     get(`/api/providers/sessions/stale${query({ olderThanDays })}`),
   // Resolves one session (by app id or provider-native id) to its metadata and
@@ -300,7 +296,6 @@ export const api = {
   sessionProviderCounts: () => get('/api/providers/sessions/provider-counts'),
   providerSessionId: (sessionId: string) =>
     get(`/api/providers/sessions/${encodeURIComponent(sessionId)}/provider-id`),
-  restoreSession: (sessionId: string) => post(`/api/providers/sessions/${sessionId}/restore`),
   // Creates an independent session holding this one's conversation up to
   // `upToAnchorId` (all of it when omitted). The source is left untouched.
   forkSession: (sessionId: string, body: { upToAnchorId?: string; title?: string } = {}) =>

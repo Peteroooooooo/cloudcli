@@ -14,6 +14,9 @@ type CliServiceDependencies = {
   applicationRoot: string;
   defaultDatabasePath: string;
   homeDirectory: string;
+  // `git` when running from a checkout. Its version is not the npm package's,
+  // so the npm registry is neither asked nor offered as an update.
+  installMode: 'git' | 'npm';
   packageMetadata: CliPackageMetadata;
   environment: CliEnvironment;
   fileSystem: CliFileSystem;
@@ -198,6 +201,11 @@ export function createCliService(dependencies: CliServiceDependencies): CliAppli
   };
 
   const updatePackage = async (): Promise<void> => {
+    if (dependencies.installMode === 'git') {
+      dependencies.output.log(`${terminalTextStyles.info('[INFO]')} This is a git checkout (${dependencies.packageMetadata.version}); update it with git, then rebuild and restart.`);
+      return;
+    }
+
     dependencies.output.log(`${terminalTextStyles.info('[INFO]')} Checking for updates...`);
     const hasUpdate = await checkForUpdates(true);
     if (!hasUpdate) {
@@ -230,7 +238,9 @@ export function createCliService(dependencies: CliServiceDependencies): CliAppli
 
       switch (parsedArguments.command) {
         case 'start':
-          void checkForUpdates(true);
+          if (dependencies.installMode !== 'git') {
+            void checkForUpdates(true);
+          }
           await dependencies.startServer();
           return 0;
         case 'sandbox':

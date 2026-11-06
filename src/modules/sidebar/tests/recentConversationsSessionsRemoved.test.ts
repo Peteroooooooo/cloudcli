@@ -7,36 +7,19 @@ import { beforeEach, test, vi } from 'vitest';
 import type { Project, RecentConversationListItem, ServerEvent } from '@/shared/types';
 
 /**
- * The Conversations list is fetched once when its tab opens. A session whose
- * transcript is deleted outside the app is announced with `sessions_removed`;
- * the list has to drop that row itself, or it stays until the tab is reopened.
+ * The Conversations list is fetched once when its tab opens. A deleted session
+ * is announced with `sessions_removed`, whether it went outside the app or from
+ * this sidebar; the list has to drop that row itself, or it stays until the tab
+ * is reopened, and must not take it off the total twice.
  */
 
 const recentConversationsResponse = vi.fn();
+const deleteSession = vi.fn();
 
 vi.mock('@/shared/api', () => ({
   api: {
     recentConversations: () => recentConversationsResponse(),
-    archivedProjects: () => Promise.resolve({ ok: true, json: async () => ({ data: { projects: [] } }) }),
-    getArchivedSessions: () => Promise.resolve({
-      ok: true,
-      json: async () => ({
-        data: {
-          sessions: [{
-            sessionId: 'archived-1',
-            provider: 'claude',
-            projectId: null,
-            projectPath: null,
-            projectDisplayName: 'repo',
-            sessionTitle: 'Archived',
-            createdAt: null,
-            updatedAt: null,
-            lastActivity: null,
-            isProjectArchived: false,
-          }],
-        },
-      }),
-    }),
+    deleteSession: (sessionId: string) => deleteSession(sessionId),
   },
 }));
 
@@ -63,6 +46,7 @@ const emit = (event: ServerEvent) => {
 beforeEach(() => {
   localStorage.clear();
   listeners.clear();
+  deleteSession.mockReset();
   recentConversationsResponse.mockReset();
   recentConversationsResponse.mockResolvedValue({
     ok: true,
@@ -76,17 +60,18 @@ beforeEach(() => {
   });
 });
 
-test('sessions deleted outside the app leave the open Conversations and archived lists', async () => {
-  // Stable across renders: the controller resets state whenever `projects` changes.
-  const projects: Project[] = [];
-  const noSessions = new Set<string>();
+// Stable across renders: the controller resets state whenever `projects` changes.
+const projects: Project[] = [];
+const noSessions = new Set<string>();
+
+async function renderWithOpenConversations() {
   const subscribe = (listener: (event: ServerEvent) => void) => {
     listeners.add(listener);
     return () => {
       listeners.delete(listener);
     };
   };
-  const { result } = renderHook(() => useSidebarController({
+  const rendered = renderHook(() => useSidebarController({
     projects,
     selectedProject: null,
     selectedSession: null,
@@ -105,21 +90,53 @@ test('sessions deleted outside the app leave the open Conversations and archived
   }));
 
   act(() => {
-    result.current.setSearchMode('conversations');
+    rendered.result.current.setSearchMode('conversations');
   });
   await waitFor(() => {
-    assert.equal(result.current.recentConversations.length, 3);
-    assert.equal(result.current.archivedSessions.length, 1);
+    assert.equal(rendered.result.current.recentConversations.length, 3);
   });
+  return rendered;
+}
+
+test('sessions deleted outside the app leave the open Conversations list', async () => {
+  const { result } = await renderWithOpenConversations();
 
   act(() => {
-    emit({ kind: 'sessions_removed', sessionIds: ['session-2', 'archived-1', 'not-loaded'], projectIds: [] });
+    emit({ kind: 'sessions_removed', sessionIds: ['session-2', 'not-loaded'], projectIds: [] });
   });
 
   assert.deepEqual(result.current.recentConversations.map((row) => row.sessionId), ['session-1', 'session-3']);
   // Only the loaded row that went is taken off the total.
   assert.equal(result.current.recentConversationsTotal, 9);
-  assert.deepEqual(result.current.archivedSessions, []);
   // The list was patched in place, not refetched.
   assert.equal(recentConversationsResponse.mock.calls.length, 1);
+});
+
+test('a delete from the sidebar takes its rows off the total once, though the server announces it too', async () => {
+  // The server tells every client before it answers the request that deleted.
+  deleteSession.mockImplementation(async (sessionId: string) => {
+    emit({ kind: 'sessions_removed', sessionIds: [sessionId], projectIds: [] });
+    return { ok: true, text: async () => '' };
+  });
+  const { result } = await renderWithOpenConversations();
+
+  act(() => {
+    result.current.showDeleteSelectedSessionsConfirmation(['session-1', 'session-2']);
+  });
+  await act(async () => {
+    await result.current.confirmDeleteSessions();
+  });
+
+  assert.deepEqual(result.current.recentConversations.map((row) => row.sessionId), ['session-3']);
+  assert.equal(result.current.recentConversationsTotal, 8);
+
+  act(() => {
+    result.current.showDeleteSessionConfirmation('session-3', 'session-3');
+  });
+  await act(async () => {
+    await result.current.confirmDeleteSession();
+  });
+
+  assert.deepEqual(result.current.recentConversations, []);
+  assert.equal(result.current.recentConversationsTotal, 7);
 });

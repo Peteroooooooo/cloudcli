@@ -1652,11 +1652,8 @@ export type ThemeMode = 'light' | 'dark' | 'system';
 /** The ordering applied to the project list, either alphabetically by name or by most recent activity, persisted alongside the user's appearance settings. */
 export type ProjectSortOrder = 'name' | 'date';
 
-/** Which list the sidebar is currently showing: projects, conversation search results, running sessions or archived items. */
-export type SidebarSearchMode = 'projects' | 'conversations' | 'running' | 'archived';
-
-/** A Project narrowed to the archived state so archived entries can be listed and restored without being mistaken for active projects. */
-export type ArchivedProjectListItem = Project & { isArchived: true };
+/** Which list the sidebar is currently showing: projects, conversation search results or running sessions. */
+export type SidebarSearchMode = 'projects' | 'conversations' | 'running';
 
 /** A ProjectSession whose LLM provider has been resolved into the required __provider field, so list rendering never has to re-derive it. */
 export type SessionWithProvider = ProjectSession & {
@@ -1681,9 +1678,7 @@ export type ArchivedSessionListItem = {
 export type StaleSessionListItem = Pick<
   ArchivedSessionListItem,
   'sessionId' | 'provider' | 'projectId' | 'projectPath' | 'projectDisplayName' | 'sessionTitle' | 'lastActivity'
-> & {
-  isArchived: boolean;
-};
+>;
 
 /** What a permanent bulk delete left behind: the sessions it could not delete, with the reason. */
 export type SessionDeletionFailure = {
@@ -1721,7 +1716,7 @@ export type ActiveSidebarRename =
  */
 export type PendingSidebarDeletion =
   | { kind: 'project'; project: Project; sessionCount: number }
-  | { kind: 'session'; sessionId: string; sessionTitle: string; isArchived: boolean }
+  | { kind: 'session'; sessionId: string; sessionTitle: string }
   | { kind: 'sessions'; sessionIds: string[] };
 
 /**

@@ -17,10 +17,8 @@ const staleSessions = vi.fn();
 
 vi.mock('@/shared/api', () => ({
   api: {
-    deleteSession: (sessionId: string, hardDelete?: boolean) => deleteSession(sessionId, hardDelete),
+    deleteSession: (sessionId: string) => deleteSession(sessionId),
     staleSessions: (days?: number) => staleSessions(days),
-    archivedProjects: () => Promise.resolve({ ok: true, json: async () => ({ data: { projects: [] } }) }),
-    getArchivedSessions: () => Promise.resolve({ ok: true, json: async () => ({ data: { sessions: [] } }) }),
     recentConversations: () => Promise.resolve({ ok: true, json: async () => ({ data: { conversations: [], total: 0, hasMore: false } }) }),
     migrateLegacyProjectStars: () => Promise.resolve({ ok: true, json: async () => ({}) }),
   },
@@ -51,7 +49,6 @@ const stale = (sessionId: string, projectId: string, extra: Partial<StaleSession
   projectDisplayName: projectId,
   sessionTitle: `title ${sessionId}`,
   lastActivity: '2026-10-20T00:00:00.000Z',
-  isArchived: false,
   ...extra,
 });
 
@@ -67,7 +64,7 @@ const buttonWithText = (text: string): HTMLButtonElement | null =>
 
 test('the dialog lists old sessions by project, all ticked, and deletes only after confirming', async () => {
   staleSessions.mockImplementation(() => okJson({
-    sessions: [stale('a1', 'alpha'), stale('a2', 'alpha', { isArchived: true }), stale('b1', 'beta', { provider: 'codex' })],
+    sessions: [stale('a1', 'alpha'), stale('a2', 'alpha'), stale('b1', 'beta', { provider: 'codex' })],
   }));
   const onDeleteSessions = vi.fn(async () => [{ sessionId: 'b1', message: 'thread is attached to another thread' }]);
 
@@ -78,7 +75,7 @@ test('the dialog lists old sessions by project, all ticked, and deletes only aft
   const boxes = [...document.body.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
   assert.equal(boxes.length, 5, 'two project boxes and three session boxes');
   assert.ok(boxes.every((box) => box.checked), 'everything listed starts ticked');
-  assert.ok(document.body.textContent?.includes('staleCleanup.archived'), 'archived sessions are marked');
+  assert.equal(document.body.textContent?.includes('rchived'), false, 'nothing is marked archived');
 
   fireEvent.click(buttonWithText('staleCleanup.delete:count=3')!);
   assert.equal(onDeleteSessions.mock.calls.length, 0, 'the first click only asks');
@@ -156,7 +153,6 @@ test('the controller deletes across projects, skips running sessions and returns
   });
 
   assert.deepEqual(deleteSession.mock.calls.map((call) => call[0]).sort(), ['bad', 'good'], 'a running session is not sent');
-  assert.ok(deleteSession.mock.calls.every((call) => call[1] === true), 'every delete is permanent');
   assert.deepEqual(onSessionDelete.mock.calls, [['good']]);
   assert.deepEqual(
     failures.map((failure) => [failure.sessionId, failure.message]).sort(),

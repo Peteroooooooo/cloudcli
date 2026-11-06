@@ -11,7 +11,8 @@ export function createSystemRouter(
   router.post('/update', async (_request, response, next) => {
     try {
       const result = await systemUpdateService.updateSystem();
-      response.status(result.success ? 200 : 500).json(result);
+      const failureStatus = 'refused' in result ? 409 : 500;
+      response.status(result.success ? 200 : failureStatus).json(result);
     } catch (error) {
       next(error);
     }

@@ -41,13 +41,17 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
 
   /**
    * Scans ~/.codex/sessions and upserts discovered sessions into DB.
+   *
+   * `archived_sessions/` is left out: a thread archived in Codex is dropped
+   * from the index, and comes back once Codex moves it into `sessions/` again.
    */
   async synchronize(since?: Date): Promise<number> {
     const nameMap = await this.readNameIndex();
     const files = await findFilesRecursivelyChangedAfter(
       path.join(this.codexHome, 'sessions'),
       '.jsonl',
-      since ?? null
+      since ?? null,
+      { indexedPaths: sessionsDb.getTranscriptPathsByProvider(this.provider) },
     );
 
     let processed = 0;
@@ -63,7 +67,9 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
 
     // A rename in Codex only touches the index, never the rollout, so the
     // file scan above cannot see renames made while nothing was watching.
-    this.applyNameIndex(nameMap);
+    // Read again: a rename made while the files were being read would
+    // otherwise be undone with the names read at the start.
+    this.applyNameIndex(await this.readNameIndex());
 
     return processed;
   }

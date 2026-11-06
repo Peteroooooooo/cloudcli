@@ -305,7 +305,11 @@ function readChecklistSignature(message: NormalizedMessage): string {
  */
 const MAX_TOOL_RESULT_CONTENT = 40_000;
 
-function truncateOutput(value: string): string {
+/**
+ * Caps one tool output string. Applied to live tool results too, which reach
+ * every watching socket and the run's replay buffer, not only to history.
+ */
+export function truncateOutput(value: string): string {
   if (value.length <= MAX_TOOL_RESULT_CONTENT) {
     return value;
   }

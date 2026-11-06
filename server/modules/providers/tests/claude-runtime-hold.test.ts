@@ -7,6 +7,8 @@ import test from 'node:test';
 import { ClaudeSessionsProvider } from '@/modules/providers/list/claude/claude-sessions.provider.js';
 import { CLAUDE_PREDEFINED_MODELS } from '@/modules/providers/list/claude/claude-models.provider.js';
 import {
+  abortClaudeSDKSession,
+  isClaudeSDKSessionHeld,
   listClaudeSDKBackgroundWork,
   queryClaudeSDK,
   stopClaudeSDKTask,
@@ -305,5 +307,67 @@ test('a turn whose tool emits no task events still holds on the static rule', as
     await settle();
 
     assert.equal(script.released(), false, 'Monitor reports no task, so the launch rule decides');
+  });
+});
+
+test('a hold for a tool with no task events reads as held, and a stop lets it go', async () => {
+  await withRun(async ({ script, sent }) => {
+    script.emit(init());
+    script.emit(toolUse('toolu_wake', 'ScheduleWakeup', { delaySeconds: 600, prompt: 'check the build again' }));
+    script.emit(ack('toolu_wake', 'Wakeup scheduled', {}));
+    script.emit(result());
+    await waitFor(() => sent.some((message) => message.kind === 'complete'));
+
+    assert.equal(script.released(), false);
+    assert.deepEqual(listClaudeSDKBackgroundWork(), [], 'no task was reported for it');
+    assert.equal(isClaudeSDKSessionHeld(SESSION_ID), true, 'so the hold itself is the background work');
+
+    assert.equal(await abortClaudeSDKSession(SESSION_ID), true);
+    await waitFor(() => script.released());
+    assert.equal(isClaudeSDKSessionHeld(SESSION_ID), false);
+  });
+});
+
+test('a run stopped while it was being set up never creates its query', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'claude-runtime-hold-'));
+  const sent: NormalizedMessage[] = [];
+  const writer = { send: (message: NormalizedMessage) => { sent.push(message); }, userId: null };
+  const sessions = new ClaudeSessionsProvider({ getLiveRunStartTime: () => null });
+  let queriesCreated = 0;
+  const stop = new AbortController();
+  stop.abort();
+
+  try {
+    await queryClaudeSDK('hello', { sessionId: SESSION_ID, cwd, stopSignal: stop.signal }, writer as never, {
+      resolveProviderSessionId: () => null,
+      resolveResumeModel: async () => undefined,
+      getProviderModels: async () => CLAUDE_PREDEFINED_MODELS as never,
+      normalizeMessage: (raw, sessionId) => sessions.normalizeMessage(raw, sessionId),
+      isProviderInstalled: async () => true,
+      createQuery: (options) => {
+        queriesCreated += 1;
+        return createScriptedQuery().createQuery(options);
+      },
+    });
+
+    assert.equal(queriesCreated, 0);
+    assert.equal(sent.some((message) => message.kind === 'complete'), false, 'the gateway reports the stop');
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test('a live tool result is capped like the history copy before it is sent', async () => {
+  await withRun(async ({ script, sent }) => {
+    script.emit(init());
+    script.emit(toolUse('toolu_cat', 'Bash', { command: 'cat big.log' }));
+    script.emit(ack('toolu_cat', 'x'.repeat(100_000), {}));
+    await waitFor(() => sent.some((message) => message.kind === 'tool_result'));
+
+    const live = sent.find((message) => message.kind === 'tool_result');
+    assert.ok(typeof live?.content === 'string');
+    assert.ok(live.content.length < 41_000, `sent ${live.content.length} characters`);
+    assert.match(live.content, /60000 more characters$/);
+    script.emit(result());
   });
 });

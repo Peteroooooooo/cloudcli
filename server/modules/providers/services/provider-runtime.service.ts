@@ -99,7 +99,8 @@ export function createProviderRuntimeService(
 
     hasBackgroundWork(sessionId: string): boolean {
       return dependencies.listProviders().some((provider) =>
-        (provider.runtime.listBackgroundWork?.() ?? []).some((entry) => entry.sessionId === sessionId));
+        Boolean(provider.runtime.isHoldingSession?.(sessionId))
+        || (provider.runtime.listBackgroundWork?.() ?? []).some((entry) => entry.sessionId === sessionId));
     },
 
     resolveToolApproval(requestId: string, decision: ProviderPermissionDecision): void {

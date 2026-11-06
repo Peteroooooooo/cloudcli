@@ -125,10 +125,6 @@
     "createProjectError": "Error al crear el proyecto. Inténtalo de nuevo.",
     "updateProjectError": "Error al actualizar el proyecto. Inténtalo de nuevo.",
     "refreshError": "No se pudo actualizar. Inténtalo de nuevo.",
-    "restoreProjectFailed": "No se pudo restaurar el proyecto. Inténtalo de nuevo.",
-    "restoreProjectError": "Error al restaurar el proyecto. Inténtalo de nuevo.",
-    "restoreSessionFailed": "No se pudo restaurar la sesión. Inténtalo de nuevo.",
-    "restoreSessionError": "Error al restaurar la sesión. Inténtalo de nuevo.",
     "forkSessionError": "No se pudo bifurcar esta sesión. Inténtalo de nuevo.",
     "deleteSessionsPartialFailure_one": "No se pudo eliminar {{count}} sesión de {{total}}. Inténtalo de nuevo.",
     "deleteSessionsPartialFailure_other": "No se pudieron eliminar {{count}} de {{total}} sesiones. Inténtalo de nuevo.",
@@ -143,10 +139,8 @@
     "modeConversations": "Conversaciones",
     "modeMore": "Más",
     "runningTooltip": "Sesiones en ejecución",
-    "archiveOnlyTooltip": "Solo archivados",
     "conversationsPlaceholder": "Buscar en conversaciones...",
     "runningPlaceholder": "Buscar sesiones en ejecución...",
-    "archivedPlaceholder": "Buscar sesiones archivadas...",
     "searching": "Buscando...",
     "sessionTitles": "Títulos de sesiones",
     "conversationContents": "Contenido de conversaciones",
@@ -173,20 +167,6 @@
     "emptyDescription": "El trabajo activo aparecerá aquí mientras un proveedor lo esté procesando.",
     "noMatchingSessions": "Ninguna sesión en ejecución coincide con esta búsqueda."
   },
-  "archived": {
-    "title": "Archivados",
-    "restoreHint": "Restaura elementos cuando los necesites",
-    "loadingTitle": "Cargando archivados...",
-    "loadingDescription": "Obteniendo los proyectos y sesiones ocultos que puedes restaurar más tarde.",
-    "emptyTitle": "No hay elementos archivados",
-    "emptyDescription": "Los proyectos y sesiones archivados aparecerán aquí cuando los ocultes de la lista activa.",
-    "noMatchingSessions": "No hay elementos archivados que coincidan",
-    "tryDifferentSearch": "Prueba con otro término de búsqueda.",
-    "restoreAction": "Restaurar",
-    "restoreProject": "Restaurar proyecto",
-    "restore": "Restaurar sesión",
-    "deletePermanently": "Eliminar permanentemente"
-  },
   "deleteConfirmation": {
     "deleteProject": "Quitar proyecto",
     "deleteSession": "Eliminar sesión",
@@ -195,10 +175,6 @@
     "sessionCount_other": "Este proyecto contiene {{count}} conversaciones.",
     "sessionCount_many": "Este proyecto contiene {{count}} conversaciones.",
     "removeFromSidebar": "Solo quitar de la barra lateral",
-    "archiveProject": "Archivar proyecto",
-    "archiveSession": "Archivar sesión",
-    "archiveSessionNotice": "Archivar mantiene la sesión fuera de la lista activa y conserva su historial.",
-    "archivedSessionNotice": "Esta sesión ya está archivada. Puedes mantenerla oculta o eliminarla permanentemente.",
     "deleteSessionPermanently": "Eliminar permanentemente",
     "deleteAllData": "Eliminar todos los datos permanentemente",
     "allConversationsDeleted": "El proyecto se quitará de la barra lateral. Tus archivos, memorias y datos de sesión se conservarán.",
@@ -209,12 +185,6 @@
     "deleteSessions_many": "Eliminar {{count}} sesiones",
     "selectedSessions_one": "{{count}} sesión seleccionada",
     "selectedSessions_other": "{{count}} sesiones seleccionadas",
-    "selectedSessions_many": "{{count}} sesiones seleccionadas",
-    "archiveSessions_one": "Archivar {{count}} sesión",
-    "archiveSessions_other": "Archivar {{count}} sesiones",
-    "archiveSessions_many": "Archivar {{count}} sesiones",
-    "archiveSessionsNotice_one": "Archivar mantiene la sesión fuera de la lista activa y conserva su historial.",
-    "archiveSessionsNotice_other": "Archivar mantiene las sesiones fuera de la lista activa y conserva su historial.",
-    "archiveSessionsNotice_many": "Archivar mantiene las sesiones fuera de la lista activa y conserva su historial."
+    "selectedSessions_many": "{{count}} sesiones seleccionadas"
   }
 }

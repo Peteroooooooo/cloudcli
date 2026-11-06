@@ -86,6 +86,109 @@ test('a stale socket close cannot detach the socket that replaced it', () => {
   pty.emitExit();
 });
 
+const MINUTE = 60 * 1000;
+
+function attachPlainShell(
+  pty: ReturnType<typeof createFakePty>,
+  sessionId: string,
+) {
+  const socket = createFakeSocket();
+  handleShellConnection(socket as never, {
+    resolveProviderSessionId: () => null,
+    spawnPty: () => pty as never,
+  });
+  socket.emit(
+    'message',
+    JSON.stringify({
+      type: 'init',
+      projectPath: process.cwd(),
+      sessionId,
+      hasSession: false,
+      provider: 'plain-shell',
+      isPlainShell: true,
+      initialCommand: 'long-task',
+    })
+  );
+  return socket;
+}
+
+// A long build or test run in a terminal nobody is watching must keep running.
+test('a detached pty that keeps writing output is not killed', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const pty = createFakePty();
+  const socket = attachPlainShell(pty, `busy-detached-${Date.now()}`);
+
+  socket.emit('close');
+  t.mock.timers.tick(20 * MINUTE);
+  pty.emitData('still building');
+  t.mock.timers.tick(20 * MINUTE);
+  assert.equal(pty.killed, false, '40 minutes detached, but output 20 minutes ago');
+
+  t.mock.timers.tick(10 * MINUTE - 1);
+  assert.equal(pty.killed, false);
+  t.mock.timers.tick(1);
+  assert.equal(pty.killed, true, 'killed after 30 minutes without output');
+});
+
+test('a silent detached pty is killed after 30 minutes', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const pty = createFakePty();
+  const socket = attachPlainShell(pty, `silent-detached-${Date.now()}`);
+  // Output from long before the detach does not shorten the grace period.
+  pty.emitData('done');
+  t.mock.timers.tick(60 * MINUTE);
+
+  socket.emit('close');
+  t.mock.timers.tick(30 * MINUTE - 1);
+  assert.equal(pty.killed, false);
+  t.mock.timers.tick(1);
+  assert.equal(pty.killed, true);
+});
+
+test('a reattached pty is never killed by the idle timer', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const pty = createFakePty();
+  const sessionId = `reattached-${Date.now()}`;
+  const firstSocket = attachPlainShell(pty, sessionId);
+
+  firstSocket.emit('close');
+  t.mock.timers.tick(10 * MINUTE);
+  attachPlainShell(pty, sessionId);
+  t.mock.timers.tick(120 * MINUTE);
+
+  assert.equal(pty.killed, false);
+  pty.emitExit();
+});
+
+test('the replay buffer keeps the newest 2 MB of output, however many chunks', () => {
+  const pty = createFakePty();
+  const sessionId = `replay-buffer-${Date.now()}`;
+  attachPlainShell(pty, sessionId).emit('close');
+
+  // More chunks than the old 5000-chunk cap, all of them small.
+  for (let index = 0; index < 6000; index += 1) {
+    pty.emitData('.');
+  }
+  const replayedOutput = (socket: ReturnType<typeof createFakeSocket>) => socket.frames
+    .map((frame) => JSON.parse(frame) as { type: string; data?: string })
+    .filter((frame) => frame.type === 'output' && !frame.data?.includes('Reconnected'))
+    .map((frame) => frame.data ?? '');
+
+  const smallReplay = attachPlainShell(pty, sessionId);
+  assert.equal(replayedOutput(smallReplay).join(''), '.'.repeat(6000));
+  smallReplay.emit('close');
+
+  const megabyte = 1024 * 1024;
+  pty.emitData('a'.repeat(megabyte));
+  pty.emitData('b'.repeat(megabyte));
+  pty.emitData('c'.repeat(megabyte - 6000));
+
+  const largeReplay = replayedOutput(attachPlainShell(pty, sessionId));
+  assert.deepEqual(largeReplay.map((chunk) => chunk[0]), ['b', 'c']);
+  assert.ok(largeReplay.join('').length <= 2 * megabyte);
+  pty.emitExit();
+});
+
 test('shell output detects and normalizes a wrapped authentication URL', () => {
   const pty = createFakePty();
   const socket = createFakeSocket();
