@@ -199,5 +199,20 @@
     "partialResult": "Deleted {{deleted}}. {{failed}} could not be deleted; they are still listed with the reason.",
     "runningNow": "It is running now.",
     "close": "Close"
+  },
+  "openElsewhere": {
+    "vscode": "VS Code",
+    "cli": "CLI",
+    "other": "Other app",
+    "tooltip": {
+      "vscode": "Open in VS Code",
+      "cli": "Open in the Claude CLI",
+      "other": "Open in another Claude app"
+    },
+    "running": {
+      "vscode": "Running in VS Code",
+      "cli": "Running in the Claude CLI",
+      "other": "Running in another Claude app"
+    }
   }
 }

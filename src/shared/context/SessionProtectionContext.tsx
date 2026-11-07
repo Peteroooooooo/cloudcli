@@ -4,27 +4,37 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useState,
 } from 'react';
 import type { ReactNode } from 'react';
 
 import {
   useSessionProtection,
 } from '@/shared/hooks/useSessionProtection';
-import type { BackgroundTaskSummary, GetSessionActivity, IsSessionProcessing, MarkSessionBackground, MarkSessionIdle, MarkSessionProcessing, SessionActivity, SessionActivityMap, SyncProcessingSessions } from '@/shared/types';
+import type { BackgroundTaskSummary, GetSessionActivity, IsSessionProcessing, MarkSessionBackground, MarkSessionIdle, MarkSessionProcessing, SessionActivity, SessionActivityMap, SessionOpenElsewhere, SessionOpenElsewhereMap, SyncProcessingSessions } from '@/shared/types';
 import { api } from '@/shared/api';
+import { i18n } from '@/modules/i18n';
 
 type RunningSessionApiItem = {
   sessionId?: unknown;
   startedAt?: unknown;
   statusText?: unknown;
+  openIn?: unknown;
   canInterrupt?: unknown;
   background?: unknown;
   tasks?: unknown;
 };
 
+type OpenElsewhereApiItem = {
+  sessionId?: unknown;
+  openIn?: unknown;
+  busy?: unknown;
+};
+
 type RunningSessionsApiPayload = {
   data?: {
     sessions?: RunningSessionApiItem[];
+    openElsewhere?: OpenElsewhereApiItem[];
   };
 };
 
@@ -41,6 +51,10 @@ const SessionProtectionStateContext = createContext<SessionActivityMap | null>(n
 const SessionProtectionActionsContext = createContext<SessionProtectionActions | null>(null);
 const BusySessionIdsContext = createContext<ReadonlySet<string> | null>(null);
 const BackgroundSessionIdsContext = createContext<ReadonlySet<string> | null>(null);
+const NO_SESSIONS_OPEN_ELSEWHERE: SessionOpenElsewhereMap = new Map();
+// Defaults to empty rather than throwing: it only adds a marker, so a row or
+// composer rendered outside the provider simply shows none.
+const OpenElsewhereContext = createContext<SessionOpenElsewhereMap>(NO_SESSIONS_OPEN_ELSEWHERE);
 
 /**
  * The set of session ids whose activity passes `include`, with a stable
@@ -120,6 +134,31 @@ const parseBackgroundTasks = (value: unknown): BackgroundTaskSummary[] | undefin
   return tasks;
 };
 
+const OPEN_IN_VALUES = new Set<unknown>(['vscode', 'cli', 'other']);
+
+/** The poll's open-elsewhere list, keyed by session id; entries in a shape this client does not read are dropped. */
+const parseOpenElsewhere = (value: unknown): Map<string, SessionOpenElsewhere> => {
+  const sessions = new Map<string, SessionOpenElsewhere>();
+  if (!Array.isArray(value)) {
+    return sessions;
+  }
+
+  for (const item of value as (OpenElsewhereApiItem | null)[]) {
+    if (!item || typeof item.sessionId !== 'string' || !item.sessionId || !OPEN_IN_VALUES.has(item.openIn)) {
+      continue;
+    }
+    sessions.set(item.sessionId, { openIn: item.openIn as SessionOpenElsewhere['openIn'], busy: item.busy === true });
+  }
+  return sessions;
+};
+
+/** A string that is equal for two maps exactly when their entries are. */
+const openElsewhereKey = (sessions: SessionOpenElsewhereMap): string =>
+  [...sessions]
+    .map(([sessionId, { openIn, busy }]) => `${sessionId}:${openIn}:${busy ? 1 : 0}`)
+    .sort()
+    .join('\u0000');
+
 /** Mounted by the project-workspace route; tracks which sessions are busy — producing a response or running background tasks — so chat, sidebar and project-workspace agree on session activity. */
 export function SessionProtectionProvider({ children }: { children: ReactNode }) {
   const {
@@ -131,6 +170,12 @@ export function SessionProtectionProvider({ children }: { children: ReactNode })
     isSessionProcessing,
     getSessionActivity,
   } = useSessionProtection();
+
+  // Replaced only when an entry changes, so the sidebar rows reading it do not
+  // re-render on every 5 s poll.
+  const [openElsewhere, setOpenElsewhere] = useState<{ key: string; sessions: SessionOpenElsewhereMap }>(
+    { key: '', sessions: NO_SESSIONS_OPEN_ELSEWHERE },
+  );
 
   const refreshRunningSessions = useCallback(async () => {
     try {
@@ -152,7 +197,9 @@ export function SessionProtectionProvider({ children }: { children: ReactNode })
             return {
               sessionId: session.sessionId,
               startedAt: parseStartedAt(session.startedAt),
-              statusText: typeof session.statusText === 'string' ? session.statusText : undefined,
+              statusText: OPEN_IN_VALUES.has(session.openIn)
+                ? i18n.t(`sidebar:openElsewhere.running.${session.openIn as string}`)
+                : typeof session.statusText === 'string' ? session.statusText : undefined,
               canInterrupt: typeof session.canInterrupt === 'boolean' ? session.canInterrupt : undefined,
               background: session.background === true,
               tasks: parseBackgroundTasks(session.tasks),
@@ -160,6 +207,10 @@ export function SessionProtectionProvider({ children }: { children: ReactNode })
           })
           .filter((session): session is NonNullable<typeof session> => Boolean(session)),
       );
+
+      const openSessions = parseOpenElsewhere(payload.data?.openElsewhere);
+      const key = openElsewhereKey(openSessions);
+      setOpenElsewhere((previous) => (previous.key === key ? previous : { key, sessions: openSessions }));
     } catch (error) {
       console.error('[SessionProtection] Failed to sync running sessions:', error);
     }
@@ -204,7 +255,9 @@ export function SessionProtectionProvider({ children }: { children: ReactNode })
       <BusySessionIdsContext.Provider value={busySessionIds}>
         <BackgroundSessionIdsContext.Provider value={backgroundSessionIds}>
           <SessionProtectionStateContext.Provider value={processingSessions}>
-            {children}
+            <OpenElsewhereContext.Provider value={openElsewhere.sessions}>
+              {children}
+            </OpenElsewhereContext.Provider>
           </SessionProtectionStateContext.Provider>
         </BackgroundSessionIdsContext.Provider>
       </BusySessionIdsContext.Provider>
@@ -236,6 +289,15 @@ export function useBackgroundSessionIdSet(): ReadonlySet<string> {
     throw new Error('useBackgroundSessionIdSet must be used within SessionProtectionProvider');
   }
   return backgroundSessionIds;
+}
+
+/**
+ * Where one session is open in another Claude process (a VS Code panel, a
+ * terminal), or null when it is not. Stable across polls that change nothing.
+ */
+export function useSessionOpenElsewhere(sessionId: string | null | undefined): SessionOpenElsewhere | null {
+  const sessions = useContext(OpenElsewhereContext);
+  return (sessionId && sessions.get(sessionId)) || null;
 }
 
 export function useProcessingSessions(): SessionActivityMap {

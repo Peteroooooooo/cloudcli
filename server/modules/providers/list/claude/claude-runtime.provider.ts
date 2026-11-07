@@ -1112,6 +1112,7 @@ async function queryClaudeSDK(
   let reportedContextWindow: number | null = getReportedClaudeContextWindow(providerSessionId) ?? null;
   let mainThreadModel: string | null = null;
   let lastSentTokenBudget: TokenBudget | null = null;
+  let apiRetrying = false;
 
   // A new turn supersedes any earlier one still holding this session's process
   // open, so held runs cannot stack up across a conversation.
@@ -1426,6 +1427,28 @@ async function queryClaudeSDK(
           msg.content = truncateOutput(msg.content);
         }
         ws.send(msg);
+      }
+
+      // The CLI retries a failed request on its own for minutes, and none of
+      // its retry notices is a transcript row, so without this the turn just
+      // looks frozen.
+      if (message.type === 'system' && message.subtype === 'api_retry') {
+        apiRetrying = true;
+        ws.send(createNormalizedMessage({
+          kind: 'status',
+          text: 'api_retry',
+          apiRetry: {
+            attempt: Number(message.attempt) || 0,
+            maxRetries: Number(message.max_retries) || 0,
+            delayMs: Number(message.retry_delay_ms) || 0,
+            errorStatus: typeof message.error_status === 'number' ? message.error_status : null,
+          },
+          sessionId: sid,
+          provider: 'claude',
+        }));
+      } else if (apiRetrying && message.type !== 'system') {
+        apiRetrying = false;
+        ws.send(createNormalizedMessage({ kind: 'status', text: 'api_retry_cleared', sessionId: sid, provider: 'claude' }));
       }
 
       if (

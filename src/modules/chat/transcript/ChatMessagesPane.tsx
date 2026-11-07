@@ -185,6 +185,17 @@ function ChatMessagesPane({
     [messageKeyMap],
   );
 
+  const exportMenu = (
+    <ChatExportMenu
+      messages={chatMessages}
+      sessionTitle={selectedSession?.summary || selectedSession?.title}
+      provider={provider}
+      selectedProject={selectedProject}
+      createDiff={createDiff}
+      onLoadFullTranscript={onLoadFullTranscript}
+    />
+  );
+
   return (
     <div
       ref={scrollContainerRef}
@@ -207,17 +218,12 @@ function ChatMessagesPane({
               onLoadAll={loadAllMessages}
             />
           </div>
-          <div className="pointer-events-auto">
-            <ChatExportMenu
-              messages={chatMessages}
-              sessionTitle={selectedSession?.summary || selectedSession?.title}
-              provider={provider}
-              selectedProject={selectedProject}
-              createDiff={createDiff}
-              onLoadFullTranscript={onLoadFullTranscript}
-            />
-          </div>
+          <div className="pointer-events-auto hidden sm:block">{exportMenu}</div>
         </div>
+      )}
+      {/* A phone's text column has no spare width, so a floating export button would sit on the text; there it scrolls with the transcript instead. */}
+      {chatMessages.length > 0 && (
+        <div className="-mt-1 mb-2 flex justify-end px-4 sm:hidden">{exportMenu}</div>
       )}
       <div className="mx-auto w-full max-w-[54.25rem] space-y-3 px-4 sm:space-y-4">
       {(isLoadingSessionMessages || isProcessing) && chatMessages.length === 0 ? (

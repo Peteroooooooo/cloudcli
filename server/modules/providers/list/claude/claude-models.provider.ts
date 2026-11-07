@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { open, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -359,25 +359,134 @@ const extractClaudeModelFromMessageContent = (content: unknown): string | null =
   return null;
 };
 
-const readClaudeSessionModelFromJsonl = async (
+type ClaudeTranscriptRecord = ClaudeInitEvent & {
+  attachment?: { type?: string; identity?: { modelId?: string } };
+  params?: { model?: string };
+};
+
+/**
+ * The model Claude Code itself asked for on this line, if the line records one.
+ *
+ * A reply's `message.model` is whatever the endpoint answered with, and a
+ * gateway answers with its own upstream name (`claude-opus-5-5` for a turn
+ * requested as `claude-fable-5`). Sending that name back as the session's model
+ * routes the next turn somewhere else, so the request side is what counts.
+ */
+export const extractClaudeRequestedModel = (
+  event: ClaudeTranscriptRecord,
+  sessionId: string,
+): string | null => {
+  const eventSessionId = event.sessionId ?? event.session_id;
+  if (eventSessionId && eventSessionId !== sessionId) {
+    return null;
+  }
+
+  const requested = event.type === 'attachment' && event.attachment?.type === 'model'
+    ? event.attachment.identity?.modelId
+    : event.type === 'api-request'
+      ? event.params?.model
+      : undefined;
+  const model = typeof requested === 'string' ? requested.trim() : '';
+  return model && !isPlaceholderProviderModel(model) ? model : null;
+};
+
+const TRANSCRIPT_TAIL_CHUNK_BYTES = 256 * 1024;
+
+/**
+ * Yields a JSONL file's lines newest first, reading it from the end in chunks
+ * so a long transcript is not loaded whole to find its last few records.
+ */
+async function* readJsonlLinesFromEnd(jsonlPath: string): AsyncGenerator<string> {
+  const handle = await open(jsonlPath, 'r');
+  try {
+    let position = (await handle.stat()).size;
+    let carry = Buffer.alloc(0);
+    while (position > 0) {
+      const length = Math.min(TRANSCRIPT_TAIL_CHUNK_BYTES, position);
+      position -= length;
+      const chunk = Buffer.alloc(length);
+      await handle.read(chunk, 0, length, position);
+      const buffer = Buffer.concat([chunk, carry]);
+      let end = buffer.length;
+      for (let index = buffer.length - 1; index >= 0; index -= 1) {
+        if (buffer[index] === 0x0a) {
+          const line = buffer.subarray(index + 1, end).toString('utf8').trim();
+          if (line) {
+            yield line;
+          }
+          end = index;
+        }
+      }
+      carry = Buffer.from(buffer.subarray(0, end));
+    }
+    const first = carry.toString('utf8').trim();
+    if (first) {
+      yield first;
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Turns a model id found in a transcript into a value the picker offers.
+ *
+ * A pinned id maps back to its alias (`claude-fable-5` → `fable`), so the
+ * picker selects the row the user knows and the next turn is sent the same
+ * way. Returns null for an id the picker does not offer.
+ */
+export const mapClaudeModelToCatalogValue = (
+  model: string,
+  catalog: ProviderModelsDefinition,
+  env: ClaudeModelEnv,
+): string | null => {
+  const candidates = [model, ...Array.from(model.matchAll(/\(([^()]+)\)/g), (match) => match[1])]
+    .map((candidate) => candidate.trim())
+    .filter(Boolean);
+  const comparable = (value: string) => value.toLowerCase().replace(/\[1m\]$/, '');
+
+  for (const candidate of candidates) {
+    const option = catalog.OPTIONS.find((entry) => entry.value === candidate);
+    if (option) {
+      return option.value;
+    }
+    for (const { alias, envKey } of CLAUDE_PINNABLE_ALIASES) {
+      const pinnedId = env[`ANTHROPIC_DEFAULT_${envKey}_MODEL`];
+      if (pinnedId && comparable(pinnedId) === comparable(candidate)
+        && catalog.OPTIONS.some((entry) => entry.value === alias)) {
+        return alias;
+      }
+    }
+  }
+  return null;
+};
+
+export const readClaudeSessionModelFromJsonl = async (
   sessionId: string,
   jsonlPath: string,
+  catalog: ProviderModelsDefinition,
+  env: ClaudeModelEnv,
 ): Promise<ProviderCurrentActiveModel | null> => {
-  const content = await readFile(jsonlPath, 'utf8');
-  const lines = content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
+  for await (const line of readJsonlLinesFromEnd(jsonlPath)) {
+    let event: ClaudeTranscriptRecord;
     try {
-      const event = JSON.parse(lines[index]) as ClaudeInitEvent;
-      const model = extractClaudeEventModel(event, sessionId);
-      if (model) {
-        return { model };
-      }
+      event = JSON.parse(line) as ClaudeTranscriptRecord;
     } catch {
       // Skip malformed JSONL lines that can happen during concurrent writes.
+      continue;
+    }
+
+    const requested = extractClaudeRequestedModel(event, sessionId);
+    if (requested) {
+      return { model: mapClaudeModelToCatalogValue(requested, catalog, env) ?? requested };
+    }
+
+    // Older transcripts record no request, only replies. A reply's model is
+    // trusted only when it is something the picker offers.
+    const reported = extractClaudeEventModel(event, sessionId);
+    const mapped = reported ? mapClaudeModelToCatalogValue(reported, catalog, env) : null;
+    if (mapped) {
+      return { model: mapped };
     }
   }
 
@@ -407,8 +516,9 @@ export class ClaudeProviderModels implements IProviderModels {
 
     try {
       const jsonlPath = sessionsDb.getSessionById(sessionId)?.jsonl_path;
+      const env = await readClaudeModelEnv();
       const activeModel = jsonlPath
-        ? await readClaudeSessionModelFromJsonl(sessionId, jsonlPath)
+        ? await readClaudeSessionModelFromJsonl(sessionId, jsonlPath, applyClaudePinnedModels(env), env)
         : null;
       if (activeModel?.model) {
         return activeModel;

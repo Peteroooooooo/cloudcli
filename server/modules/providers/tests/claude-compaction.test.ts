@@ -99,3 +99,26 @@ test('the summary keeps its flag, so the client can fold it into the row', () =>
   assert.equal(row.role, 'assistant');
   assert.equal(row.isCompactSummary, true);
 });
+
+test('the live summary, flagged only isSynthetic, is folded the same way', () => {
+  const [row] = provider.normalizeMessage({
+    type: 'user',
+    isSynthetic: true,
+    session_id: SESSION_ID,
+    message: { role: 'user', content: 'This session is being continued from a previous conversation that ran out of context.' },
+  }, SESSION_ID);
+
+  assert.equal(row.role, 'assistant');
+  assert.equal(row.isCompactSummary, true);
+});
+
+test('another synthetic user message is not taken for a summary', () => {
+  const rows = provider.normalizeMessage({
+    type: 'user',
+    isSynthetic: true,
+    session_id: SESSION_ID,
+    message: { role: 'user', content: 'Please continue with the task.' },
+  }, SESSION_ID);
+
+  assert.ok(rows.every((row) => !row.isCompactSummary));
+});

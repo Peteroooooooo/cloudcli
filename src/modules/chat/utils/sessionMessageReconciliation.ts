@@ -37,6 +37,27 @@ function readMessageTime(message: NormalizedMessage): number | null {
   return Number.isFinite(time) ? time : null;
 }
 
+/**
+ * Where the rows that may retire an edited message's echo begin.
+ *
+ * The cut is remembered by the last row that survived it, because a row count
+ * stops meaning anything once the history is re-read as a page: the latest
+ * page of a long session is shorter than the count, and nothing in it would
+ * ever qualify. The count only stands in when that row is gone from a list at
+ * least as long as the one that was cut.
+ */
+function firstEligibleServerIndex(localMessage: NormalizedMessage, serverMessages: NormalizedMessage[]): number {
+  const boundaryId = localMessage.replacesAfterRowId;
+  if (boundaryId) {
+    const boundaryIndex = serverMessages.findIndex((message) => message.id === boundaryId);
+    if (boundaryIndex >= 0) {
+      return boundaryIndex + 1;
+    }
+  }
+  const count = localMessage.replacesAfterRowCount ?? 0;
+  return serverMessages.length >= count ? count : 0;
+}
+
 function findServerEchoForLocalUser(
   localMessage: NormalizedMessage,
   serverMessages: NormalizedMessage[],
@@ -54,7 +75,7 @@ function findServerEchoForLocalUser(
   // the moment of the copy, so an earlier turn with the same words — "yes",
   // "continue", the typo being corrected — lands inside the window and would
   // retire the message the user just sent.
-  const firstEligibleIndex = localMessage.replacesAfterRowCount ?? 0;
+  const firstEligibleIndex = firstEligibleServerIndex(localMessage, serverMessages);
 
   const dedupeWindow = localFingerprint.text
     ? LOCAL_USER_DEDUPE_WINDOW_MS
@@ -95,12 +116,21 @@ function findServerEchoForLocalUser(
 /**
  * Removes local optimistic user rows once a corresponding persisted turn is
  * available. Matches are one-to-one so repeated sends cannot claim one row.
+ *
+ * An echo with no match is also dropped once the transcript holds rows from
+ * well after it was sent: by then its turn has been persisted or refused, and
+ * its persisted copy may simply be older than the page that was read. Left in
+ * place it would sit below the newest reply for good.
  */
 export function removeOptimisticUserEchoes(
   serverMessages: NormalizedMessage[],
   realtimeMessages: NormalizedMessage[],
 ): NormalizedMessage[] {
   const claimedServerIds = new Set<string>();
+  const newestServerTime = serverMessages.reduce(
+    (newest, message) => Math.max(newest, readMessageTime(message) ?? 0),
+    0,
+  );
 
   return realtimeMessages.filter((message) => {
     if (!message.id.startsWith('local_')) {
@@ -109,7 +139,8 @@ export function removeOptimisticUserEchoes(
 
     const serverEcho = findServerEchoForLocalUser(message, serverMessages, claimedServerIds);
     if (!serverEcho) {
-      return true;
+      const localTime = readMessageTime(message);
+      return localTime === null || newestServerTime - localTime <= LOCAL_USER_DEDUPE_WINDOW_MS;
     }
 
     claimedServerIds.add(serverEcho.id);

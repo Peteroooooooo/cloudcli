@@ -36,6 +36,7 @@ vi.mock('@/shared/context/WebSocketContext', () => ({
 }));
 vi.mock('@/shared/context/SessionProtectionContext', () => ({
   useProcessingSessions: () => new Map(),
+  useSessionOpenElsewhere: () => null,
   useSessionProtectionActions: () => ({
     markSessionProcessing: () => {},
     markSessionIdle: () => {},

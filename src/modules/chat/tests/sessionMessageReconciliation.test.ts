@@ -99,3 +99,52 @@ test('a replacement echo survives a kept turn that repeats its text', () => {
   const persisted = [...kept, userRow('persisted', 'continue', '2026-01-01T00:00:25.000Z')];
   assert.deepEqual(removeOptimisticUserEchoes(persisted, [echo]), []);
 });
+
+const pageRow = (id: string, role: 'user' | 'assistant', content: string, timestamp: string) => ({
+  id,
+  kind: 'text',
+  role,
+  provider: 'claude',
+  sessionId: 's1',
+  content,
+  timestamp,
+}) as NormalizedMessage;
+
+test('an edit echo is retired after the history is re-read as a page shorter than the cut', () => {
+  // The cut kept 200 rows; the latest page holds 61, the last surviving row
+  // among them, then the persisted replacement.
+  const echo = {
+    ...pageRow('local_1', 'user', 'edited text', '2026-11-07T11:03:29.000Z'),
+    replacesAnchorId: 'turn-b',
+    replacesAfterRowCount: 200,
+    replacesAfterRowId: 'kept-199',
+  } as NormalizedMessage;
+  const page = [
+    pageRow('kept-199', 'assistant', 'before the cut', '2026-11-07T11:02:37.000Z'),
+    pageRow('persisted', 'user', 'edited text', '2026-11-07T11:04:01.000Z'),
+    ...Array.from({ length: 59 }, (_, index) => pageRow(`reply-${index}`, 'assistant', `x${index}`, '2026-11-07T11:05:00.000Z')),
+  ];
+
+  assert.deepEqual(removeOptimisticUserEchoes(page, [echo]), []);
+});
+
+test('an echo whose persisted copy is older than the page is dropped once the transcript has moved on', () => {
+  const echo = {
+    ...pageRow('local_1', 'user', 'edited text', '2026-11-07T11:03:29.000Z'),
+    replacesAnchorId: 'turn-b',
+    replacesAfterRowCount: 200,
+    replacesAfterRowId: 'kept-199',
+  } as NormalizedMessage;
+  const laterPage = Array.from({ length: 61 }, (_, index) => (
+    pageRow(`reply-${index}`, 'assistant', `x${index}`, '2026-11-07T11:13:36.000Z')
+  ));
+
+  assert.deepEqual(removeOptimisticUserEchoes(laterPage, [echo]), []);
+});
+
+test('an unmatched echo stays while the transcript has nothing from well after it', () => {
+  const echo = pageRow('local_1', 'user', 'just sent', '2026-11-07T11:03:29.000Z');
+  const page = [pageRow('reply', 'assistant', 'earlier', '2026-11-07T11:02:00.000Z')];
+
+  assert.deepEqual(removeOptimisticUserEchoes(page, [echo]), [echo]);
+});

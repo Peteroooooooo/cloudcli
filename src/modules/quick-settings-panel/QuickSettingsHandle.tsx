@@ -13,6 +13,7 @@ import type { QuickSettingsHandleStyle } from '@/shared/types';
 
 type QuickSettingsHandleProps = {
   isOpen: boolean;
+  isMobile: boolean;
   isDragging: boolean;
   style: QuickSettingsHandleStyle;
   onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
@@ -23,6 +24,7 @@ type QuickSettingsHandleProps = {
 /** Rendered by QuickSettingsPanelView as the draggable edge handle that opens and closes the drawer. */
 export default function QuickSettingsHandle({
   isOpen,
+  isMobile,
   isDragging,
   style,
   onClick,
@@ -39,6 +41,13 @@ export default function QuickSettingsHandle({
     ? ''
     : 'transition-all duration-150 ease-out';
   const cursorClass = isDragging ? 'cursor-grabbing' : 'cursor-pointer';
+  // On a phone the transcript runs to 16px from the screen edge, so the
+  // collapsed handle is a slim tab that fits that gutter instead of covering text.
+  const isSlim = isMobile && !isOpen;
+  const sizeClass = isSlim
+    ? 'flex h-14 w-4 items-center justify-center rounded-l-md border-r-0 p-0'
+    : 'rounded-l-md p-2';
+  const iconClass = isSlim ? 'h-3.5 w-3.5' : 'h-5 w-5';
   const ariaLabel = isDragging
     ? t('quickSettings.dragHandle.dragging')
     : isOpen
@@ -54,7 +63,7 @@ export default function QuickSettingsHandle({
       onClick={onClick}
       onMouseDown={onMouseDown}
       onTouchStart={onTouchStart}
-      className={`fixed ${placementClass} z-50 ${transitionClass} border bg-white dark:bg-gray-800 ${borderClass} rounded-l-md p-2 shadow-lg transition-colors hover:bg-gray-100 dark:hover:bg-gray-700 ${cursorClass} touch-none`}
+      className={`fixed ${placementClass} z-50 ${transitionClass} border bg-white dark:bg-gray-800 ${borderClass} ${sizeClass} shadow-lg transition-colors hover:bg-gray-100 dark:hover:bg-gray-700 ${cursorClass} touch-none`}
       style={{
         ...style,
         touchAction: 'none',
@@ -65,11 +74,11 @@ export default function QuickSettingsHandle({
       title={title}
     >
       {isDragging ? (
-        <GripVertical className="h-5 w-5 text-blue-500 dark:text-blue-400" />
+        <GripVertical className={`${iconClass} text-blue-500 dark:text-blue-400`} />
       ) : isOpen ? (
-        <ChevronRight className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+        <ChevronRight className={`${iconClass} text-gray-600 dark:text-gray-400`} />
       ) : (
-        <ChevronLeft className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+        <ChevronLeft className={`${iconClass} text-gray-600 dark:text-gray-400`} />
       )}
     </button>
   );

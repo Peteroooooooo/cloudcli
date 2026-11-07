@@ -3,13 +3,28 @@ import os from 'node:os';
 import path from 'node:path';
 
 /**
- * One Claude CLI process that is currently producing a response.
+ * Which kind of program holds a live Claude process, from the `entrypoint`
+ * Claude Code records for it: the VS Code extension, the CLI in a terminal
+ * (CloudCLI's own Shell view included), or anything else built on Claude Code.
+ */
+export type ClaudeProcessHost = 'vscode' | 'cli' | 'other';
+
+/**
+ * One live Claude process that has a session open, busy or idle.
  *
  * `providerSessionId` is Claude's own session id, which is what the registry
  * records; callers map it onto an app session themselves.
  */
-type LiveClaudeCliSession = {
+export type LiveClaudeProcess = {
   providerSessionId: string;
+  host: ClaudeProcessHost;
+  /** Producing a response right now, as opposed to waiting for input. */
+  busy: boolean;
+  /**
+   * For a busy process, when its current turn began; otherwise when the
+   * process started. The registry has no turn-start field, but it rewrites
+   * `statusUpdatedAt` when the status flips to busy, which is that moment.
+   */
   startedAt: number;
 };
 
@@ -27,6 +42,20 @@ const registryDirectory = () => path.join(os.homedir(), '.claude', 'sessions');
  * unbounded filesystem work. Real installations hold a handful of entries.
  */
 const MAX_REGISTRY_FILES = 256;
+
+/**
+ * The entrypoint CloudCLI's own chat runs register under (see
+ * `buildClaudeSdkEnv`). Those processes are the chat-run registry's to report;
+ * listing them here would show CloudCLI's own turns as happening elsewhere.
+ */
+const CLOUDCLI_ENTRYPOINT = 'claudecodeui';
+
+function hostFromEntrypoint(entrypoint: unknown): ClaudeProcessHost {
+  if (entrypoint === 'claude-vscode') {
+    return 'vscode';
+  }
+  return entrypoint === 'cli' ? 'cli' : 'other';
+}
 
 /**
  * Whether `pid` is still the process the registry recorded.
@@ -63,8 +92,11 @@ async function isRecordedProcessAlive(pid: number, procStart: unknown): Promise<
   }
 }
 
-/** Reads one registry file, returning null for anything that is not a live busy session. */
-async function readLiveBusySession(filePath: string): Promise<LiveClaudeCliSession | null> {
+const finiteNumber = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null;
+
+/** Reads one registry file, returning null for anything that is not a live process outside CloudCLI. */
+async function readLiveProcess(filePath: string): Promise<LiveClaudeProcess | null> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(await fsp.readFile(filePath, 'utf8'));
@@ -81,7 +113,7 @@ async function readLiveBusySession(filePath: string): Promise<LiveClaudeCliSessi
 
   const providerSessionId = typeof record.sessionId === 'string' ? record.sessionId : '';
   const pid = typeof record.pid === 'number' ? record.pid : NaN;
-  if (!providerSessionId || !Number.isInteger(pid) || pid <= 0 || record.status !== 'busy') {
+  if (!providerSessionId || !Number.isInteger(pid) || pid <= 0 || record.entrypoint === CLOUDCLI_ENTRYPOINT) {
     return null;
   }
 
@@ -89,20 +121,29 @@ async function readLiveBusySession(filePath: string): Promise<LiveClaudeCliSessi
     return null;
   }
 
-  const startedAt = typeof record.startedAt === 'number' ? record.startedAt : Date.now();
-  return { providerSessionId, startedAt };
+  const busy = record.status === 'busy';
+  const processStartedAt = finiteNumber(record.startedAt);
+  const turnStartedAt = busy ? finiteNumber(record.statusUpdatedAt) : null;
+  return {
+    providerSessionId,
+    host: hostFromEntrypoint(record.entrypoint),
+    busy,
+    startedAt: turnStartedAt ?? processStartedAt ?? Date.now(),
+  };
 }
 
 /**
- * Lists the Claude CLI sessions that are mid-turn right now.
+ * Lists the live Claude processes that have a session open, busy or idle,
+ * other than CloudCLI's own chat runs.
  *
  * Used by the providers module's sessions service so the running-sessions poll
- * also reports turns driven outside CloudCLI's own chat runs — including the
+ * also reports turns driven outside CloudCLI's own chat runs, including the
  * `claude` processes CloudCLI itself spawns for the Shell view, which live in
- * the PTY map rather than the chat-run registry. Liveness is ephemeral, so it
- * is recomputed on every read instead of being cached or persisted.
+ * the PTY map rather than the chat-run registry, and so the chat can warn that
+ * a session is open in another process. Liveness is ephemeral, so it is
+ * recomputed on every read instead of being cached or persisted.
  */
-export async function listBusyClaudeCliSessions(): Promise<LiveClaudeCliSession[]> {
+export async function listLiveClaudeProcesses(): Promise<LiveClaudeProcess[]> {
   let entries: string[];
   try {
     entries = await fsp.readdir(registryDirectory());
@@ -113,9 +154,9 @@ export async function listBusyClaudeCliSessions(): Promise<LiveClaudeCliSession[
   }
 
   const registryFiles = entries.filter((entry) => entry.endsWith('.json')).slice(0, MAX_REGISTRY_FILES);
-  const sessions = await Promise.all(
-    registryFiles.map((entry) => readLiveBusySession(path.join(registryDirectory(), entry))),
+  const processes = await Promise.all(
+    registryFiles.map((entry) => readLiveProcess(path.join(registryDirectory(), entry))),
   );
 
-  return sessions.filter((session): session is LiveClaudeCliSession => session !== null);
+  return processes.filter((live): live is LiveClaudeProcess => live !== null);
 }

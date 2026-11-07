@@ -10,12 +10,12 @@ import type {
   RefObject,
   TouchEvent,
 } from 'react';
-import { PaperclipIcon, MessageSquareIcon, XIcon, Loader2, ArrowUpIcon, PencilIcon } from 'lucide-react';
+import { PaperclipIcon, MessageSquareIcon, XIcon, Loader2, ArrowUpIcon, PencilIcon, GitBranchIcon } from 'lucide-react';
 
 import { useVoiceInput } from '@/modules/chat/hooks/useVoiceInput';
 import { useVoiceAvailable } from '@/modules/chat/hooks/useVoiceAvailable';
 import { MCP_ELICITATION_TOOL_NAME } from '@/shared/constants';
-import type { BackgroundSendChoice, BackgroundSendPrompt, QueuedDraft, ScheduledMessage, SlashCommand,SessionActivity,PendingPermissionRequest,PermissionMode,ProviderModelOption } from '@/shared/types';
+import type { BackgroundSendChoice, BackgroundSendPrompt, QueuedDraft, ScheduledMessage, SlashCommand,SessionActivity,SessionOpenElsewhere,PendingPermissionRequest,PermissionMode,ProviderModelOption } from '@/shared/types';
 import {
   PromptInput,
   PromptInputHeader,
@@ -78,6 +78,12 @@ type ChatComposerProps = {
   onResolveBackgroundSendPrompt: (choice: BackgroundSendChoice) => void;
   /** Set while the composer is replacing an already-sent message. */
   isEditingSentMessage: boolean;
+  /**
+   * Another Claude process (a VS Code panel, a terminal) has this session
+   * open. A send from here still goes through, but the composer says it
+   * branches the conversation, since that process will not see the turn.
+   */
+  openElsewhere?: SessionOpenElsewhere | null;
   onCancelEditMessage: () => void;
   /** Messages waiting to be sent to this session later. */
   scheduledMessages: ScheduledMessage[];
@@ -154,6 +160,7 @@ export default function ChatComposer({
   backgroundSendPrompt,
   onResolveBackgroundSendPrompt,
   isEditingSentMessage,
+  openElsewhere = null,
   onCancelEditMessage,
   scheduledMessages,
   onScheduleMessage,
@@ -298,6 +305,17 @@ export default function ChatComposer({
         scheduledMessages={scheduledMessages}
         onCancel={onCancelScheduledMessage}
       />
+
+      {openElsewhere && (
+        <div
+          role="note"
+          data-testid="open-elsewhere-notice"
+          className="mx-auto mb-2 flex max-w-[54.25rem] items-start gap-2 rounded-xl border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+        >
+          <GitBranchIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span className="min-w-0 flex-1">{t(`composer.openElsewhere.${openElsewhere.openIn}`)}</span>
+        </div>
+      )}
 
       {isEditingSentMessage && (
         <div className="mx-auto mb-2 flex max-w-[54.25rem] items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-foreground">

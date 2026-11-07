@@ -15,6 +15,9 @@ import {
 
 type EffortOption = NonNullable<ProviderModelOption['effort']>['values'][number];
 
+const MIN_LABEL_LENGTH_TO_SPLIT = 12;
+const LABEL_TAIL_LENGTH = 8;
+
 type ComposerModelMenuProps = {
   effort: string;
   /** Effort values the active provider/model actually accepts; empty hides the section. */
@@ -74,6 +77,9 @@ function ComposerModelMenu({
   }
 
   const triggerLabel = hasModelSection ? modelLabel : effortLabel;
+  const tailLength = triggerLabel.length > MIN_LABEL_LENGTH_TO_SPLIT ? LABEL_TAIL_LENGTH : 0;
+  const triggerLabelHead = triggerLabel.slice(0, triggerLabel.length - tailLength);
+  const triggerLabelTail = triggerLabel.slice(triggerLabel.length - tailLength);
   const ariaLabel = t('composer.modelMenu', {
     defaultValue: 'Select model and reasoning effort',
   });
@@ -87,13 +93,17 @@ function ComposerModelMenu({
           updateAnchor();
           setIsOpen((current) => !current);
         }}
-        className="flex h-8 max-w-20 shrink-0 items-center gap-1 rounded-lg border border-border/60 bg-muted/40 px-2 text-xs font-medium text-foreground transition-colors hover:bg-muted sm:max-w-56"
+        className="flex h-8 max-w-28 shrink-0 items-center gap-1 rounded-lg border border-border/60 bg-muted/40 px-2 text-xs font-medium text-foreground transition-colors hover:bg-muted sm:max-w-56"
         aria-haspopup="menu"
         aria-expanded={isOpen}
         aria-label={ariaLabel}
         title={ariaLabel}
       >
-        <span className="truncate">{triggerLabel}</span>
+        {/* Ids in a family differ at the end (claude-opus-5-5 vs claude-opus-5-5-kiro), so a narrow button elides the middle and keeps the tail. */}
+        <span className="flex min-w-0">
+          <span className="truncate">{triggerLabelHead}</span>
+          <span className="shrink-0 whitespace-pre">{triggerLabelTail}</span>
+        </span>
         {hasModelSection && hasEffortSection && effort !== DEFAULT_EFFORT_VALUE && (
           <span className="hidden shrink-0 capitalize text-muted-foreground sm:inline">· {effortLabel}</span>
         )}

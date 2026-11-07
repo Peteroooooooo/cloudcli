@@ -11,6 +11,7 @@ import { PROVIDER_LABELS, createSessionViewModel, formatCompactAge } from '@/mod
 import { useCompactSidebar } from '@/modules/sidebar/hooks/useCompactSidebar';
 import { useProviderSessionIdCopy } from '@/modules/sidebar/hooks/useProviderSessionIdCopy';
 import SessionOptions from '@/modules/sidebar/SessionOptions';
+import OpenElsewhereMarker from '@/modules/sidebar/OpenElsewhereMarker';
 
 type SidebarSessionItemProps = {
   project: Project;
@@ -225,12 +226,13 @@ function SidebarSessionItem({
                   <span className="ml-auto flex-shrink-0 text-[11px] text-muted-foreground">{compactSessionAge}</span>
                 )}
               </div>
-              <div className="mt-0.5 flex items-center">
+              <div className="mt-0.5 flex items-center gap-1.5">
                 {sessionView.messageCount > 0 && (
                   <Badge variant="secondary" className="px-1 py-0 text-xs">
                     {sessionView.messageCount}
                   </Badge>
                 )}
+                <OpenElsewhereMarker sessionId={session.id} t={t} />
               </div>
             </div>
 
@@ -487,8 +489,9 @@ function SidebarSessionItem({
                   </span>
                 )}
               </div>
-              <div className="mt-0.5 flex items-center">
+              <div className="mt-0.5 flex items-center gap-1.5">
                 {sessionView.messageCount > 0 && <Badge variant="secondary" className="px-1 py-0 text-xs">{sessionView.messageCount}</Badge>}
+                <OpenElsewhereMarker sessionId={session.id} t={t} />
               </div>
             </div>
           </div>

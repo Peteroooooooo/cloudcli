@@ -4,7 +4,8 @@ import path from 'node:path';
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { broadcastSessionsRemoved, broadcastSessionUpserted, chatRunRegistry } from '@/modules/websocket/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
-import { listBusyClaudeCliSessions } from '@/modules/providers/services/claude-cli-liveness.service.js';
+import { listLiveClaudeProcesses } from '@/modules/providers/services/claude-cli-liveness.service.js';
+import type { ClaudeProcessHost } from '@/modules/providers/services/claude-cli-liveness.service.js';
 import { eraseSessionFromProvider } from '@/modules/providers/services/session-deletion.service.js';
 import { sessionHistoryCache } from '@/modules/providers/services/session-history-cache.service.js';
 import type {
@@ -27,10 +28,10 @@ import { AppError, sliceTailPage } from '@/shared/utils.js';
  * abort — a task is stopped by id through `chat.stop-task` instead. `tasks`
  * rides along on both kinds whenever the session has any.
  *
- * A turn driven outside CloudCLI — the Claude CLI in the Shell view, or a
- * terminal the user opened themselves — is listed the same way, with
- * `canInterrupt: false` because there is no run here to abort, and a
- * `statusText` saying where the work is happening.
+ * A turn driven outside CloudCLI — a VS Code panel, the Claude CLI in the
+ * Shell view, or a terminal the user opened themselves — is listed the same
+ * way, with `canInterrupt: false` because there is no run here to abort, a
+ * `statusText` saying where the work is happening, and `openIn` naming it.
  */
 type RunningSessionEntry = {
   sessionId: string;
@@ -40,7 +41,26 @@ type RunningSessionEntry = {
   background?: true;
   canInterrupt?: false;
   statusText?: string;
+  openIn?: ClaudeProcessHost;
   tasks?: BackgroundTaskSummary[];
+};
+
+/** A session another Claude process has open, whether or not it is mid-turn. */
+type OpenElsewhereEntry = {
+  sessionId: string;
+  openIn: ClaudeProcessHost;
+  busy: boolean;
+};
+
+type RunningSessionsSnapshot = {
+  sessions: RunningSessionEntry[];
+  openElsewhere: OpenElsewhereEntry[];
+};
+
+const RUNNING_ELSEWHERE_STATUS: Record<ClaudeProcessHost, string> = {
+  vscode: 'Running in VS Code',
+  cli: 'Running in the Claude CLI',
+  other: 'Running in another Claude process',
 };
 
 type CreateAppSessionResult = {
@@ -150,6 +170,20 @@ export const sessionsService = {
    * indicators should not attach to chat streams or request replayed messages.
    */
   async listRunningSessions(): Promise<RunningSessionEntry[]> {
+    return (await sessionsService.getRunningSessionsSnapshot()).sessions;
+  },
+
+  /**
+   * The running-sessions poll's whole payload: the busy sessions of
+   * `listRunningSessions`, plus every session some other Claude process has
+   * open right now, busy or idle.
+   *
+   * `openElsewhere` exists because a turn sent from CloudCLI resumes the
+   * session in a process of its own; the VS Code panel or terminal that also
+   * has it open never sees that turn, and its next message branches the
+   * transcript. Both lists come from one read of the process registry.
+   */
+  async getRunningSessionsSnapshot(): Promise<RunningSessionsSnapshot> {
     const entries: RunningSessionEntry[] = chatRunRegistry.listRunningRuns();
     const runningById = new Map(entries.map((entry) => [entry.sessionId, entry]));
 
@@ -174,13 +208,25 @@ export const sessionsService = {
       }
     }
 
-    // The chat-run registry only knows about turns CloudCLI drives itself, so
-    // without this a session working under the Claude CLI — including one
-    // CloudCLI spawned for its own Shell view — looks idle. A session already
-    // listed above keeps its richer entry.
-    for (const live of await listBusyClaudeCliSessions()) {
+    const openElsewhereById = new Map<string, OpenElsewhereEntry>();
+    for (const live of await listLiveClaudeProcesses()) {
       const session = sessionsDb.getSessionByProviderSessionId(live.providerSessionId);
-      if (!session || runningById.has(session.session_id)) {
+      if (!session) {
+        continue;
+      }
+
+      const known = openElsewhereById.get(session.session_id);
+      // Two processes can hold one session (a VS Code panel and a terminal
+      // resume); the busy one is the more useful to report.
+      if (!known || (live.busy && !known.busy)) {
+        openElsewhereById.set(session.session_id, { sessionId: session.session_id, openIn: live.host, busy: live.busy });
+      }
+
+      // The chat-run registry only knows about turns CloudCLI drives itself, so
+      // without this a session working under another Claude process — including
+      // one CloudCLI spawned for its own Shell view — looks idle. A session
+      // already listed above keeps its richer entry.
+      if (!live.busy || runningById.has(session.session_id)) {
         continue;
       }
 
@@ -189,15 +235,16 @@ export const sessionsService = {
         provider: session.provider as LLMProvider,
         startedAt: live.startedAt,
         lastSeq: chatRunRegistry.getRun(session.session_id)?.lastSeq ?? 0,
-        // There is no run here to abort: the turn belongs to a CLI process
+        // There is no run here to abort: the turn belongs to a process
         // CloudCLI does not own, so it can be reported but not interrupted.
         canInterrupt: false,
-        statusText: 'Running in the Claude CLI',
+        statusText: RUNNING_ELSEWHERE_STATUS[live.host],
+        openIn: live.host,
       });
       runningById.set(session.session_id, entries[entries.length - 1]);
     }
 
-    return entries;
+    return { sessions: entries, openElsewhere: [...openElsewhereById.values()] };
   },
 
   /**

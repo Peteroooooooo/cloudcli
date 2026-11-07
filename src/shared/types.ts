@@ -266,6 +266,22 @@ export type SessionActivitySnapshot = {
   tasks?: BackgroundTaskSummary[];
 };
 
+/**
+ * A session another Claude process has open right now, as reported by the
+ * running-sessions poll: a VS Code panel, the Claude CLI in a terminal, or
+ * some other program built on Claude Code. Sending from CloudCLI resumes the
+ * session in a separate process, so that one never sees the turn and the
+ * transcript branches once it is continued there.
+ */
+export type SessionOpenElsewhere = {
+  openIn: 'vscode' | 'cli' | 'other';
+  /** That process is producing a response, not waiting for input. */
+  busy: boolean;
+};
+
+/** Every session open in another Claude process, keyed by session id. */
+export type SessionOpenElsewhereMap = ReadonlyMap<string, SessionOpenElsewhere>;
+
 // ---------------------------
 
 //----------------- REALTIME TRANSPORT ------------
@@ -539,6 +555,8 @@ export type NormalizedMessage = {
    * when the cut was made, so this is where those rows begin.
    */
   replacesAfterRowCount?: number;
+  /** The id of the last persisted row that survived that cut, which still finds the cut after the history is re-read as a shorter page. */
+  replacesAfterRowId?: string;
   sessionId: string;
   timestamp: string;
   provider: LLMProvider;
@@ -589,6 +607,8 @@ export type NormalizedMessage = {
   tokens?: number;
   canInterrupt?: boolean;
   tokenBudget?: unknown;
+  /** On an `api_retry` status: the CLI is waiting to retry a failed request; `errorStatus` is null for a connection error. */
+  apiRetry?: { attempt: number; maxRetries: number; delayMs: number; errorStatus: number | null };
   requestId?: string;
   input?: unknown;
   context?: unknown;

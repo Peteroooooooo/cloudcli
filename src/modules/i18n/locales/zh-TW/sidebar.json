@@ -188,5 +188,20 @@
     "partialResult": "已刪除 {{deleted}} 個。{{failed}} 個刪除失敗，仍留在清單裡，並寫明了原因。",
     "runningNow": "它正在執行。",
     "close": "關閉"
+  },
+  "openElsewhere": {
+    "vscode": "VS Code",
+    "cli": "CLI",
+    "other": "其他程式",
+    "tooltip": {
+      "vscode": "已在 VS Code 中開啟",
+      "cli": "已在 Claude CLI 中開啟",
+      "other": "已在另一個 Claude 程式中開啟"
+    },
+    "running": {
+      "vscode": "正在 VS Code 中執行",
+      "cli": "正在 Claude CLI 中執行",
+      "other": "正在另一個 Claude 程式中執行"
+    }
   }
 }

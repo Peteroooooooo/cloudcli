@@ -7,6 +7,25 @@ import { playChatCompletionSound, playNotificationSound } from '@/shared/utils';
 import type { SessionStore } from '@/modules/chat/hooks/useSessionStore';
 import { normalizedToChatMessages } from '@/modules/chat/hooks/useChatMessages';
 import { collectRunningBackgroundTasks, listRunningBackgroundLaunches, readBackgroundTaskId, readBackgroundTaskStatus } from '@/modules/chat/utils/backgroundTasks';
+import { i18n } from '@/modules/i18n';
+
+/** The activity label for a request the CLI is waiting to retry. */
+export const describeApiRetry = (retry: NormalizedMessage['apiRetry']): string => {
+  const attempt = retry?.attempt ?? 0;
+  const max = retry?.maxRetries ?? 0;
+  return retry?.errorStatus
+    ? i18n.t('chat:claudeStatus.retrying', {
+      status: retry.errorStatus,
+      attempt,
+      max,
+      defaultValue: 'Request failed ({{status}}), retrying {{attempt}}/{{max}}',
+    })
+    : i18n.t('chat:claudeStatus.retryingConnection', {
+      attempt,
+      max,
+      defaultValue: 'Connection failed, retrying {{attempt}}/{{max}}',
+    });
+};
 
 const isActionablePermissionRequest = (request: { toolName?: unknown } | null | undefined): boolean => {
   return request?.toolName !== 'ExitPlanMode' && request?.toolName !== 'exit_plan_mode';
@@ -417,6 +436,13 @@ export function useChatRealtimeHandlers({
             if (sid === activeViewSessionId) {
               setTokenBudget(msg.tokenBudget as Record<string, unknown>);
             }
+          } else if (msg.text === 'api_retry' && sid) {
+            onSessionProcessing?.(sid, {
+              statusText: describeApiRetry(msg.apiRetry as NormalizedMessage['apiRetry']),
+              canInterrupt: true,
+            });
+          } else if (msg.text === 'api_retry_cleared' && sid) {
+            onSessionProcessing?.(sid, { statusText: null, canInterrupt: true });
           } else if (msg.text && sid) {
             onSessionProcessing?.(sid, {
               statusText: msg.text as string,

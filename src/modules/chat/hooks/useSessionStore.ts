@@ -798,7 +798,11 @@ export function useSessionStore() {
       // Stamped here because this is the only place that knows how much of the
       // conversation survived, which is what tells the echo apart from the
       // turns it now sits after.
-      ? [{ ...replacements[replacements.length - 1], replacesAfterRowCount: cutIndex }]
+      ? [{
+        ...replacements[replacements.length - 1],
+        replacesAfterRowCount: cutIndex,
+        replacesAfterRowId: cutIndex > 0 ? slot.serverMessages[cutIndex - 1]?.id : undefined,
+      }]
       : EMPTY;
     // `total` counts what the server would serve; it is about to be re-fetched
     // anyway, but leaving it high makes the pager offer pages that do not exist.

@@ -7,6 +7,7 @@ import { cn } from '@/shared/utils';
 import type { ProjectSession, RecentConversationListItem, SessionRowActions } from '@/shared/types';
 import { formatCompactAge } from '@/modules/sidebar/utils/sidebarProjectFormatting';
 import SessionOptions from '@/modules/sidebar/SessionOptions';
+import OpenElsewhereMarker from '@/modules/sidebar/OpenElsewhereMarker';
 
 type SidebarRecentConversationsProps = {
   conversations: RecentConversationListItem[];
@@ -138,7 +139,7 @@ export default function SidebarRecentConversations({
                 * which carries no information in a list ordered by recency.
                 */}
               {showAttentionIndicator && (
-                <div className="absolute left-0 top-1/2 -translate-x-1 -translate-y-1/2 transform">
+                <div className="absolute left-0.5 top-1/2 -translate-y-1/2 transform">
                   <Tooltip
                     content={t('tooltips.attentionRequiredIndicator', { defaultValue: 'Session needs attention' })}
                     position="right"
@@ -176,6 +177,7 @@ export default function SidebarRecentConversations({
                   </span>
                   <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] leading-3 text-muted-foreground">
                     <span className="truncate">{conversation.projectDisplayName}</span>
+                    <OpenElsewhereMarker sessionId={conversation.sessionId} withSeparator t={t} />
                     {isProcessing ? (
                       <>
                         <span className="flex-shrink-0 text-muted-foreground/40">·</span>

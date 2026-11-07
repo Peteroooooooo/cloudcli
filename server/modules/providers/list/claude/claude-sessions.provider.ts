@@ -498,6 +498,25 @@ async function readTranscriptRows(jsonlPath: string, providerSessionId: string):
   return rows;
 }
 
+const COMPACT_SUMMARY_PREFIX = 'This session is being continued from a previous conversation';
+
+/**
+ * Whether a user record is the summary a compaction left behind.
+ *
+ * The transcript flags it `isCompactSummary`; the live stream sends the same
+ * message flagged only `isSynthetic`, which other injected messages share, so
+ * there it is recognised by the sentence the CLI opens every summary with.
+ */
+function isClaudeCompactSummaryRecord(raw: AnyRecord, text: string): boolean {
+  if (!text.trim()) {
+    return false;
+  }
+  if (raw.isCompactSummary === true) {
+    return true;
+  }
+  return raw.isSynthetic === true && text.trimStart().startsWith(COMPACT_SUMMARY_PREFIX);
+}
+
 /** True for a row the user typed, as opposed to a tool result or an injected note. */
 function isUserPromptRow(row: AnyRecord): boolean {
   if (row.type !== 'user' || row.isMeta === true || row.isCompactSummary === true) {
@@ -1464,7 +1483,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
          * text; otherwise it is both filtered by the generic internal-prefix
          * check and visually mislabeled as a user message.
          */
-        if (raw.isCompactSummary === true && text.trim()) {
+        if (isClaudeCompactSummaryRecord(raw, text)) {
           messages.push(createNormalizedMessage({
             id: baseId,
             sessionId,

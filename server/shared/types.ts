@@ -310,6 +310,14 @@ export type SessionsRemovedEvent = {
  * Every provider-specific message must be converted into this shape before being
  * emitted outside provider-specific modules.
  */
+/** The CLI's notice that a request failed and will be retried; `errorStatus` is null for a connection error. */
+export type ApiRetryInfo = {
+  attempt: number;
+  maxRetries: number;
+  delayMs: number;
+  errorStatus: number | null;
+};
+
 /**
  * A compaction, as the transcript records it.
  *
@@ -399,6 +407,8 @@ export type NormalizedMessage = {
   status?: string;
   summary?: string;
   tokenBudget?: unknown;
+  /** On an `api_retry` status: the CLI is waiting to retry a failed request. */
+  apiRetry?: ApiRetryInfo;
   /**
    * Timeline of everything a subagent did, attached to the `tool_use` that
    * spawned it. Present for Claude `Agent`/`Task` calls and Codex

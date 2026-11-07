@@ -353,7 +353,105 @@ test('running sessions report a turn driven by the Claude CLI', { concurrency: f
             lastSeq: 0,
             canInterrupt: false,
             statusText: 'Running in the Claude CLI',
+            openIn: 'cli',
           }]);
+        },
+      ),
+    );
+  });
+});
+
+test('a VS Code turn counts from when it began and says where it runs', { concurrency: false }, async () => {
+  await withIsolatedDatabase(async () => {
+    sessionsDb.createAppSession('vscode-session', 'claude', '/tmp/running-project');
+    sessionsDb.assignProviderSessionId('vscode-session', 'claude-native-vscode');
+
+    // startedAt is when the panel's process started, often hours earlier; the
+    // registry rewrites statusUpdatedAt when the status flips to busy.
+    await withClaudeCliRegistry(
+      [{
+        pid: process.pid,
+        sessionId: 'claude-native-vscode',
+        status: 'busy',
+        entrypoint: 'claude-vscode',
+        startedAt: 1_000,
+        statusUpdatedAt: 9_000,
+      }],
+      async () => await withProviders(
+        { claude: { run: async () => undefined, abort: () => false } },
+        async () => {
+          assert.deepEqual(await sessionsService.getRunningSessionsSnapshot(), {
+            sessions: [{
+              sessionId: 'vscode-session',
+              provider: 'claude',
+              startedAt: 9_000,
+              lastSeq: 0,
+              canInterrupt: false,
+              statusText: 'Running in VS Code',
+              openIn: 'vscode',
+            }],
+            openElsewhere: [{ sessionId: 'vscode-session', openIn: 'vscode', busy: true }],
+          });
+        },
+      ),
+    );
+  });
+});
+
+test('a session open but idle in VS Code is reported as open, not as running', { concurrency: false }, async () => {
+  await withIsolatedDatabase(async () => {
+    sessionsDb.createAppSession('open-session', 'claude', '/tmp/running-project');
+    sessionsDb.assignProviderSessionId('open-session', 'claude-native-open');
+
+    await withClaudeCliRegistry(
+      [{ pid: process.pid, sessionId: 'claude-native-open', status: 'idle', entrypoint: 'claude-vscode', startedAt: 1_000 }],
+      async () => await withProviders(
+        { claude: { run: async () => undefined, abort: () => false } },
+        async () => {
+          assert.deepEqual(await sessionsService.getRunningSessionsSnapshot(), {
+            sessions: [],
+            openElsewhere: [{ sessionId: 'open-session', openIn: 'vscode', busy: false }],
+          });
+        },
+      ),
+    );
+  });
+});
+
+test("CloudCLI's own Claude processes are not reported as open elsewhere", { concurrency: false }, async () => {
+  await withIsolatedDatabase(async () => {
+    sessionsDb.createAppSession('own-session', 'claude', '/tmp/running-project');
+    sessionsDb.assignProviderSessionId('own-session', 'claude-native-own');
+
+    await withClaudeCliRegistry(
+      [{ pid: process.pid, sessionId: 'claude-native-own', status: 'busy', entrypoint: 'claudecodeui', startedAt: 1_000 }],
+      async () => await withProviders(
+        { claude: { run: async () => undefined, abort: () => false } },
+        async () => {
+          assert.deepEqual(await sessionsService.getRunningSessionsSnapshot(), { sessions: [], openElsewhere: [] });
+        },
+      ),
+    );
+  });
+});
+
+test('a session held by two processes is reported once, by the busy one', { concurrency: false }, async () => {
+  await withIsolatedDatabase(async () => {
+    sessionsDb.createAppSession('shared-session', 'claude', '/tmp/running-project');
+    sessionsDb.assignProviderSessionId('shared-session', 'claude-native-shared');
+
+    // The test runner's parent is the second pid known to be alive.
+    await withClaudeCliRegistry(
+      [
+        { pid: process.pid, sessionId: 'claude-native-shared', status: 'idle', entrypoint: 'claude-vscode', startedAt: 1_000 },
+        { pid: process.ppid, sessionId: 'claude-native-shared', status: 'busy', entrypoint: 'cli', startedAt: 2_000, statusUpdatedAt: 3_000 },
+      ],
+      async () => await withProviders(
+        { claude: { run: async () => undefined, abort: () => false } },
+        async () => {
+          const snapshot = await sessionsService.getRunningSessionsSnapshot();
+          assert.deepEqual(snapshot.openElsewhere, [{ sessionId: 'shared-session', openIn: 'cli', busy: true }]);
+          assert.deepEqual(snapshot.sessions.map((entry) => [entry.sessionId, entry.startedAt]), [['shared-session', 3_000]]);
         },
       ),
     );

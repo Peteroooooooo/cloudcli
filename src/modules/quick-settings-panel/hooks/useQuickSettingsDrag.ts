@@ -218,15 +218,17 @@ export function useQuickSettingsDrag({ isMobile }: UseQuickSettingsDragProps) {
   }, []);
 
   const handleStyle = useMemo<QuickSettingsHandleStyle>(() => {
-    if (!isMobile || typeof window === 'undefined') {
+    if (!isMobile) {
       return {
         top: `${handlePosition}%`,
         transform: 'translateY(-50%)',
       };
     }
 
+    // A percentage of the viewport, so the handle stays put relative to the
+    // screen when the soft keyboard resizes it.
     return {
-      bottom: `${(window.innerHeight * handlePosition) / 100}px`,
+      bottom: `${handlePosition}%`,
     };
   }, [handlePosition, isMobile]);
 

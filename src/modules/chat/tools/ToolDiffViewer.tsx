@@ -76,7 +76,7 @@ export const ToolDiffViewer: React.FC<ToolDiffViewerProps> = ({
               {diffLine.type === 'removed' ? '-' : '+'}
             </span>
             <span
-              className={`flex-1 whitespace-pre-wrap px-2 ${
+              className={`min-w-0 flex-1 whitespace-pre-wrap px-2 [overflow-wrap:anywhere] ${
                 diffLine.type === 'removed'
                   ? 'bg-red-50/50 text-red-800 dark:bg-red-950/20 dark:text-red-200'
                   : 'bg-green-50/50 text-green-800 dark:bg-green-950/20 dark:text-green-200'
