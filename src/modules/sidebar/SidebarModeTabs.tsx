@@ -1,5 +1,5 @@
 import { Fragment } from 'react';
-import { Activity, Folder, MessageSquare, MoreHorizontal } from 'lucide-react';
+import { Folder, MessageSquare, MoreHorizontal, Terminal } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
@@ -40,7 +40,7 @@ export default function SidebarModeTabs({
   const tabs: ModeTab[] = [
     { mode: 'projects', label: t('search.modeProjects'), icon: Folder, showLabel: true },
     { mode: 'conversations', label: t('search.modeConversations'), icon: MessageSquare, showLabel: true },
-    { mode: 'running', label: t('search.runningTooltip', 'Running sessions'), icon: Activity, showLabel: false },
+    { mode: 'running', label: t('search.runningTooltip', 'Open in VS Code or a terminal'), icon: Terminal, showLabel: false },
   ];
 
   const activeIndex = tabs.findIndex((tab) => tab.mode === searchMode);
@@ -65,14 +65,14 @@ export default function SidebarModeTabs({
           isActive
             ? 'bg-background text-foreground shadow-sm'
             : 'text-muted-foreground hover:text-foreground',
-          isActive && tab.mode === 'running' && 'ring-1 ring-emerald-500/15',
+          isActive && tab.mode === 'running' && 'ring-1 ring-sky-500/15',
         )}
       >
         {tab.mode === 'running' ? (
           <span className="relative flex h-3 w-3 items-center justify-center">
-            <Activity className={cn('h-3 w-3', runningSessionsCount > 0 && 'text-emerald-500')} />
+            <Terminal className={cn('h-3 w-3', runningSessionsCount > 0 && 'text-sky-600 dark:text-sky-400')} />
             {runningSessionsCount > 0 && (
-              <span className="absolute -right-2.5 -top-2 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-emerald-500 px-0.5 text-[8px] font-semibold leading-none text-white shadow-sm ring-1 ring-background">
+              <span className="absolute -right-2.5 -top-2 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-sky-500 px-0.5 text-[8px] font-semibold leading-none text-white shadow-sm ring-1 ring-background">
                 {runningBadgeText}
               </span>
             )}

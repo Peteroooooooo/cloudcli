@@ -203,11 +203,6 @@
       "title": "Replacing an earlier message",
       "filesNotReverted": "files the agent already changed are not reverted",
       "cancel": "Cancel"
-    },
-    "openElsewhere": {
-      "vscode": "This session is also open in VS Code. Messages sent here start a separate branch that VS Code won't see.",
-      "cli": "This session is also open in the Claude CLI. Messages sent here start a separate branch that the CLI won't see.",
-      "other": "This session is also open in another Claude app. Messages sent here start a separate branch that app won't see."
     }
   },
   "providerSelection": {

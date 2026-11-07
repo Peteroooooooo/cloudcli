@@ -61,7 +61,6 @@ test('a session open in VS Code gets a badge saying where it is open', () => {
 
   const marker = getByTestId('open-elsewhere-marker');
   assert.equal(marker.getAttribute('data-open-in'), 'vscode');
-  assert.equal(marker.getAttribute('aria-label'), 'openElsewhere.tooltip.vscode');
 });
 
 test('a busy session keeps its spinner and still says where it runs', () => {

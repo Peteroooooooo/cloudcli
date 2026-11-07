@@ -1,5 +1,5 @@
 import { type ReactNode } from 'react';
-import { Activity, Folder, MessageSquare, Search } from 'lucide-react';
+import { Folder, MessageSquare, Search, Terminal } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { LLMProviderLogo, ScrollArea } from '@/shared/ui';
@@ -342,29 +342,29 @@ export default function SidebarContent({
           projectListProps.filteredProjects.length === 0 ? (
             <div className="px-4 py-12 text-center md:py-8">
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg border border-border/70 bg-muted/50 md:mb-3">
-                <Activity className="h-6 w-6 text-muted-foreground" />
+                <Terminal className="h-6 w-6 text-muted-foreground" />
               </div>
               <h3 className="mb-2 text-base font-medium text-foreground md:mb-1">
-                {t('running.emptyTitle', 'No sessions running')}
+                {t('running.emptyTitle', 'Nothing open')}
               </h3>
               <p className="text-sm text-muted-foreground">
                 {runningSessionsCount > 0
-                  ? t('running.noMatchingSessions', 'No running sessions match this search.')
-                  : t('running.emptyDescription', 'Active work will appear here while a provider is processing.')}
+                  ? t('running.noMatchingSessions', 'No open sessions match this search.')
+                  : t('running.emptyDescription', 'Claude sessions open in VS Code or a terminal appear here.')}
               </p>
             </div>
           ) : (
             <div className="space-y-2">
               <div className="mx-2 flex items-center justify-between rounded-lg border border-border/60 bg-card/50 px-3 py-2 shadow-sm">
                 <div className="flex min-w-0 items-center gap-2">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                    <Activity className="h-3.5 w-3.5" />
+                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-sky-500/10 text-sky-600 dark:text-sky-400">
+                    <Terminal className="h-3.5 w-3.5" />
                   </span>
                   <span className="truncate text-xs font-normal text-foreground">
-                    {t('running.title', 'Running now')}
+                    {t('running.title', 'Open in VS Code or a terminal')}
                   </span>
                 </div>
-                <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-normal text-emerald-700 dark:text-emerald-300">
+                <span className="rounded-full bg-sky-500/10 px-2 py-0.5 text-[11px] font-normal text-sky-700 dark:text-sky-300">
                   {runningSessionsCount}
                 </span>
               </div>

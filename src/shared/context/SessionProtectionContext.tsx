@@ -300,6 +300,11 @@ export function useSessionOpenElsewhere(sessionId: string | null | undefined): S
   return (sessionId && sessions.get(sessionId)) || null;
 }
 
+/** Every session open in another Claude process, keyed by session id. Stable across polls that change nothing. */
+export function useOpenElsewhereSessions(): SessionOpenElsewhereMap {
+  return useContext(OpenElsewhereContext);
+}
+
 export function useProcessingSessions(): SessionActivityMap {
   const processingSessions = useContext(SessionProtectionStateContext);
   if (!processingSessions) {

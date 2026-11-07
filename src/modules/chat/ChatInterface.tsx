@@ -25,7 +25,6 @@ import { useChatComposerState } from '@/modules/chat/hooks/useChatComposerState'
 import { useSessionStore } from '@/modules/chat/hooks/useSessionStore';
 import {
   useProcessingSessions,
-  useSessionOpenElsewhere,
   useSessionProtectionActions,
 } from '@/shared/context/SessionProtectionContext';
 import ChatMessagesPane from '@/modules/chat/transcript/ChatMessagesPane';
@@ -422,7 +421,6 @@ function ChatInterface({
   // reserve enough bottom space to keep the floating status tab from
   // overlapping the last message.
   const hasActivityIndicator = Boolean(sessionActivity && pendingPermissionRequests.length === 0);
-  const openElsewhere = useSessionOpenElsewhere(currentSessionId || selectedSession?.id || null);
 
   const selectedProviderLabel =
     provider === 'cursor'
@@ -549,7 +547,6 @@ function ChatInterface({
           tokenBudget={tokenBudget}
           onShowTokenUsage={showCostModal}
           isEditingSentMessage={Boolean(editingAnchorId)}
-          openElsewhere={openElsewhere}
           onCancelEditMessage={cancelEditMessage}
           scheduledMessages={scheduledMessages}
           onScheduleMessage={handleScheduleMessage}

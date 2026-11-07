@@ -81,7 +81,7 @@ export default function SidebarHeader({
   const searchPlaceholder = searchMode === 'conversations'
     ? t('search.conversationsPlaceholder')
     : searchMode === 'running'
-      ? t('search.runningPlaceholder', 'Search running sessions...')
+      ? t('search.runningPlaceholder', 'Search open sessions...')
       : t('projects.searchPlaceholder');
 
   return (

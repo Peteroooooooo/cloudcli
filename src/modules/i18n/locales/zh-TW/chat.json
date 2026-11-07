@@ -292,11 +292,6 @@
       "title": "正在取代先前的訊息",
       "filesNotReverted": "已修改的檔案不會還原",
       "cancel": "取消"
-    },
-    "openElsewhere": {
-      "vscode": "此工作階段也在 VS Code 中開啟。從這裡傳送的訊息會形成獨立的分支，VS Code 看不到這些訊息。",
-      "cli": "此工作階段也在 Claude CLI 中開啟。從這裡傳送的訊息會形成獨立的分支，CLI 看不到這些訊息。",
-      "other": "此工作階段也在另一個 Claude 程式中開啟。從這裡傳送的訊息會形成獨立的分支，那個程式看不到這些訊息。"
     }
   },
   "export": {

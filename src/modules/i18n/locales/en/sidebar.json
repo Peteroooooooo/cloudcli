@@ -138,7 +138,9 @@
     "matches_one": "{{count}} match",
     "matches_other": "{{count}} matches",
     "projectsScanned_one": "{{count}} project scanned",
-    "projectsScanned_other": "{{count}} projects scanned"
+    "projectsScanned_other": "{{count}} projects scanned",
+    "runningTooltip": "Open in VS Code or a terminal",
+    "runningPlaceholder": "Search open sessions..."
   },
   "providerFilter": {
     "label": "Filter sessions by agent",
@@ -201,15 +203,16 @@
     "close": "Close"
   },
   "openElsewhere": {
-    "tooltip": {
-      "vscode": "Open in VS Code",
-      "cli": "Open in the Claude CLI",
-      "other": "Open in another Claude app"
-    },
     "running": {
       "vscode": "Running in VS Code",
       "cli": "Running in the Claude CLI",
       "other": "Running in another Claude app"
     }
+  },
+  "running": {
+    "title": "Open in VS Code or a terminal",
+    "emptyTitle": "Nothing open",
+    "noMatchingSessions": "No open sessions match this search.",
+    "emptyDescription": "Claude sessions open in VS Code or a terminal appear here."
   }
 }

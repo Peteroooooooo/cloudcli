@@ -136,7 +136,9 @@
     "matches_one": "{{count}} 個符合",
     "matches_other": "{{count}} 個符合",
     "projectsScanned_one": "{{count}} 個專案已掃描",
-    "projectsScanned_other": "{{count}} 個專案已掃描"
+    "projectsScanned_other": "{{count}} 個專案已掃描",
+    "runningTooltip": "在 VS Code 或終端機中開啟的工作階段",
+    "runningPlaceholder": "搜尋已開啟的工作階段..."
   },
   "providerFilter": {
     "label": "依智慧代理篩選工作階段",
@@ -190,15 +192,16 @@
     "close": "關閉"
   },
   "openElsewhere": {
-    "tooltip": {
-      "vscode": "已在 VS Code 中開啟",
-      "cli": "已在 Claude CLI 中開啟",
-      "other": "已在另一個 Claude 程式中開啟"
-    },
     "running": {
       "vscode": "正在 VS Code 中執行",
       "cli": "正在 Claude CLI 中執行",
       "other": "正在另一個 Claude 程式中執行"
     }
+  },
+  "running": {
+    "title": "在 VS Code 或終端機中開啟",
+    "emptyTitle": "沒有開啟的工作階段",
+    "noMatchingSessions": "沒有符合的已開啟工作階段。",
+    "emptyDescription": "在 VS Code 或終端機中開啟的 Claude 工作階段會顯示在這裡。"
   }
 }

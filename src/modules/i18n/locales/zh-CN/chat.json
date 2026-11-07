@@ -273,11 +273,6 @@
       "title": "正在替换先前的消息",
       "filesNotReverted": "已修改的文件不会被还原",
       "cancel": "取消"
-    },
-    "openElsewhere": {
-      "vscode": "此会话也在 VS Code 中打开。从这里发送的消息会形成单独的分支，VS Code 看不到这些消息。",
-      "cli": "此会话也在 Claude CLI 中打开。从这里发送的消息会形成单独的分支，CLI 看不到这些消息。",
-      "other": "此会话也在另一个 Claude 程序中打开。从这里发送的消息会形成单独的分支，那个程序看不到这些消息。"
     }
   },
   "export": {

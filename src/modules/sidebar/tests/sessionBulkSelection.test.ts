@@ -648,6 +648,40 @@ test('unavailable browser storage does not prevent opening projects', () => {
   assert.equal(result.current.isProjectExpanded('project-2'), true);
 });
 
+const PROJECTS_WITH_SESSIONS = [{ ...PROJECT, sessions: SESSIONS }];
+const OPEN_ELSEWHERE = new Map([['s2', { openIn: 'vscode', busy: false }], ['s3', { openIn: 'cli', busy: true }]]);
+const BUSY_S1 = new Set(['s1']);
+
+test('the open view lists the sessions open in VS Code or a terminal, not the busy ones', () => {
+  const { result } = renderHook(() =>
+    useSidebarController({
+      projects: PROJECTS_WITH_SESSIONS,
+      selectedProject: null,
+      selectedSession: null,
+      activeSessions: BUSY_S1,
+      backgroundSessionIds: NO_IDS,
+      openElsewhereSessions: OPEN_ELSEWHERE,
+      isLoading: false,
+      isMobile: false,
+      t,
+      onRefresh: noop,
+      onProjectSelect: noop,
+      onSessionSelect: noop,
+      onSessionDelete: vi.fn(),
+      onLoadMoreSessions: noop,
+      onProjectDelete: noop,
+      setCurrentProject: noop,
+      setSidebarVisible: noop,
+      sidebarVisible: true,
+    }),
+  );
+  act(() => result.current.setSearchMode('running'));
+
+  assert.equal(result.current.runningSessionsCount, 2);
+  const listed = result.current.filteredProjects.flatMap((project) => (project.sessions ?? []).map((row) => row.id));
+  assert.deepEqual(listed.sort(), ['s2', 's3']);
+});
+
 test('Running groups keep their independent collapse state in multi-open mode', () => {
   const { result } = renderController(vi.fn(), { ...IDLE, keepProjectsExpanded: true });
   act(() => result.current.toggleProject('project-1'));

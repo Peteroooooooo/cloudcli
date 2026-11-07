@@ -204,7 +204,7 @@ function SidebarSessionItem({
               )}
             >
               <LLMProviderLogo provider={session.__provider} className="h-3 w-3" />
-              <OpenElsewhereMarker sessionId={session.id} t={t} />
+              <OpenElsewhereMarker sessionId={session.id} />
             </div>
 
             <div className="min-w-0 flex-1">
@@ -450,7 +450,7 @@ function SidebarSessionItem({
               )}
             >
               <LLMProviderLogo provider={session.__provider} className="h-3 w-3" />
-              <OpenElsewhereMarker sessionId={session.id} t={t} />
+              <OpenElsewhereMarker sessionId={session.id} />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">

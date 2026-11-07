@@ -8,7 +8,7 @@ import { useSidebarController } from '@/modules/sidebar/hooks/useSidebarControll
 import { useProviderFilterOptions } from '@/modules/sidebar/hooks/useProviderFilterOptions';
 import { useTaskMaster, useTasksSettings } from '@/modules/task-master';
 import { usePaletteOps } from '@/modules/command-palette';
-import { useBackgroundSessionIdSet, useBusySessionIdSet } from '@/shared/context/SessionProtectionContext';
+import { useBackgroundSessionIdSet, useBusySessionIdSet, useOpenElsewhereSessions } from '@/shared/context/SessionProtectionContext';
 import { useWebSocket } from '@/shared/context/WebSocketContext';
 import type { LLMProvider, LoadingProgress, MCPServerStatus, Project, ProjectSession, SessionProviderFilter, SidebarProjectListProps } from '@/shared/types';
 import SidebarCollapsed from '@/modules/sidebar/SidebarCollapsed';
@@ -86,6 +86,7 @@ function Sidebar({
   // would re-render the whole tree on every provider status frame.
   const activeSessions = useBusySessionIdSet();
   const backgroundSessionIds = useBackgroundSessionIdSet();
+  const openElsewhereSessions = useOpenElsewhereSessions();
   const { subscribe } = useWebSocket();
   const [showStaleCleanup, setShowStaleCleanup] = useState(false);
   const { providerFilterOptions, refreshCountsSoon } = useProviderFilterOptions({
@@ -172,6 +173,7 @@ function Sidebar({
     selectedSession,
     activeSessions,
     backgroundSessionIds,
+    openElsewhereSessions,
     isLoading,
     isMobile,
     t,

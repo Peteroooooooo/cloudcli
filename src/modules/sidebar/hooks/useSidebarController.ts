@@ -44,6 +44,8 @@ type RecentConversationsApiPayload = {
 /** Permanent deletes in flight at once; each Codex one waits for Codex's own delete. */
 const PERMANENT_DELETE_CONCURRENCY = 3;
 
+const NO_OPEN_ELSEWHERE_SESSIONS: ReadonlyMap<string, unknown> = new Map();
+
 /**
  * Narrowed copies of projects, keyed by the project object like getAllSessions,
  * so a copy keeps its identity across renders and the memoized rows hold.
@@ -115,6 +117,8 @@ type UseSidebarControllerArgs = {
   activeSessions: ReadonlySet<string>;
   /** The busy sessions only running background work; unlike the rest of `activeSessions` they can be deleted. */
   backgroundSessionIds: ReadonlySet<string>;
+  /** Sessions open in another Claude process (VS Code, a terminal); the `running` view lists these. */
+  openElsewhereSessions?: ReadonlyMap<string, unknown>;
   isLoading: boolean;
   isMobile: boolean;
   t: TFunction;
@@ -142,6 +146,7 @@ export function useSidebarController({
   selectedSession: _selectedSession,
   activeSessions,
   backgroundSessionIds,
+  openElsewhereSessions = NO_OPEN_ELSEWHERE_SESSIONS,
   isLoading,
   isMobile,
   t,
@@ -247,7 +252,6 @@ export function useSidebarController({
   const recentConversationsRef = useRef(recentConversations);
 
   const isSidebarCollapsed = !isMobile && !sidebarVisible;
-  const activeSessionIds = activeSessions;
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -883,12 +887,12 @@ export function useSidebarController({
   );
 
   const runningProjects = useMemo(() => {
-    if (activeSessionIds.size === 0) {
+    if (openElsewhereSessions.size === 0) {
       return [];
     }
 
     return providerFilteredProjects.reduce<Project[]>((acc, project) => {
-      const sessions = (project.sessions ?? []).filter((session) => activeSessionIds.has(String(session.id)));
+      const sessions = (project.sessions ?? []).filter((session) => openElsewhereSessions.has(String(session.id)));
       const runningCount = sessions.length;
 
       if (runningCount === 0) {
@@ -906,12 +910,12 @@ export function useSidebarController({
       });
       return acc;
     }, []);
-  }, [activeSessionIds, providerFilteredProjects]);
+  }, [openElsewhereSessions, providerFilteredProjects]);
 
-  // Unfiltered, every busy session counts, listed or not. Narrowed to one
+  // Unfiltered, every open session counts, listed or not. Narrowed to one
   // agent, only that agent's can be told apart: the ones in its listed rows.
   const runningSessionsCount = providerFilter === 'all'
-    ? activeSessionIds.size
+    ? openElsewhereSessions.size
     : runningProjects.reduce((count, project) => count + (project.sessions?.length ?? 0), 0);
 
   const filteredProjects = useMemo(

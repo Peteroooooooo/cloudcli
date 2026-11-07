@@ -169,7 +169,7 @@ export default function SidebarRecentConversations({
                   isSelected ? 'bg-primary/10' : 'bg-muted/60',
                 )}>
                   <LLMProviderLogo provider={conversation.provider} className="h-3.5 w-3.5" />
-                  <OpenElsewhereMarker sessionId={conversation.sessionId} t={t} />
+                  <OpenElsewhereMarker sessionId={conversation.sessionId} />
                 </span>
 
                 <span className="min-w-0 flex-1">
