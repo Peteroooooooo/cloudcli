@@ -1,16 +1,7 @@
-import { AppWindow, Code2, SquareTerminal } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { Tooltip } from '@/shared/ui';
 import { useSessionOpenElsewhere } from '@/shared/context/SessionProtectionContext';
-import type { SessionOpenElsewhere } from '@/shared/types';
-
-const ICONS: Record<SessionOpenElsewhere['openIn'], LucideIcon> = {
-  vscode: Code2,
-  cli: SquareTerminal,
-  other: AppWindow,
-};
 
 type OpenElsewhereMarkerProps = {
   sessionId: string;
@@ -18,9 +9,10 @@ type OpenElsewhereMarkerProps = {
 };
 
 /**
- * A small badge on the corner of a sidebar row's agent icon saying the session
- * is open in another Claude process, such as a VS Code panel or a terminal.
- * Renders nothing otherwise. The parent icon box must be `relative`.
+ * A small dot on the corner of a sidebar row's agent icon saying the session
+ * is open in another Claude process, such as a VS Code panel or a terminal;
+ * the tooltip names which. Renders nothing otherwise. The parent icon box
+ * must be `relative`.
  *
  * It reads the open-elsewhere map itself, so the memoized row around it does
  * not re-render when that map changes.
@@ -31,20 +23,17 @@ export default function OpenElsewhereMarker({ sessionId, t }: OpenElsewhereMarke
     return null;
   }
 
-  const Icon = ICONS[openElsewhere.openIn];
   const tooltip = t(`openElsewhere.tooltip.${openElsewhere.openIn}`);
   return (
-    <span className="absolute -bottom-0.5 -right-0.5">
+    <span className="absolute -bottom-px -right-px">
       <Tooltip content={tooltip} position="top">
         <span
           data-testid="open-elsewhere-marker"
           data-open-in={openElsewhere.openIn}
           role="img"
           aria-label={tooltip}
-          className="flex h-2.5 w-2.5 items-center justify-center rounded-full bg-background text-sky-600 dark:text-sky-400"
-        >
-          <Icon className="h-2 w-2" strokeWidth={3} />
-        </span>
+          className="block h-1.5 w-1.5 rounded-full bg-sky-500 ring-[1.5px] ring-background dark:bg-sky-400"
+        />
       </Tooltip>
     </span>
   );
