@@ -34,16 +34,16 @@ export default function OpenElsewhereMarker({ sessionId, t }: OpenElsewhereMarke
   const Icon = ICONS[openElsewhere.openIn];
   const tooltip = t(`openElsewhere.tooltip.${openElsewhere.openIn}`);
   return (
-    <span className="absolute -bottom-1 -right-1">
+    <span className="absolute -bottom-0.5 -right-0.5">
       <Tooltip content={tooltip} position="top">
         <span
           data-testid="open-elsewhere-marker"
           data-open-in={openElsewhere.openIn}
           role="img"
           aria-label={tooltip}
-          className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-sky-600 text-white ring-2 ring-background dark:bg-sky-500"
+          className="flex h-2.5 w-2.5 items-center justify-center rounded-full bg-background text-sky-600 dark:text-sky-400"
         >
-          <Icon className="h-2.5 w-2.5" strokeWidth={2.5} />
+          <Icon className="h-2 w-2" strokeWidth={3} />
         </span>
       </Tooltip>
     </span>
