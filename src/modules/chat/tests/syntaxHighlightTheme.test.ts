@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'vitest';
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
-import { buildSyntaxTheme } from '@/modules/chat/utils/syntaxHighlightTheme';
+import { buildSyntaxClassCss, buildSyntaxTheme } from '@/modules/chat/utils/syntaxHighlightTheme';
 import type { PrismStyleSheet } from '@/modules/chat/utils/syntaxHighlightTheme';
 
 /**
@@ -98,4 +98,33 @@ test('properties shared by both themes stay literal instead of becoming variable
 test('theme-dependent colours are emitted as variables', () => {
   const preRule = theme.style['pre[class*="language-"]'];
   assert.match(preRule.background, /^var\(--cc-syntax-\d+\)$/);
+});
+
+test('the class rules carry exactly the rules the inline mode applies', () => {
+  const css = buildSyntaxClassCss(theme.style, '.scope');
+  const rules = new Map(
+    css.split('\n').map((rule) => {
+      const open = rule.indexOf('{');
+      return [rule.slice(0, open), rule.slice(open + 1, -1)] as const;
+    }),
+  );
+
+  const kebab = (property: string) =>
+    property.replace(/^(Moz|O|Webkit|ms)(?=[A-Z])/, (prefix) => `-${prefix.toLowerCase()}`)
+      .replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+  const declarations = (rule: Record<string, string>) =>
+    Object.entries(rule).map(([property, value]) => `${kebab(property)}:${value};`).join('');
+
+  // The inline mode styles a token by its class names and the <pre> by this one key.
+  const tokenKeys = Object.keys(theme.style).filter((key) => /^[\w-]+(?:\.[\w-]+)*$/.test(key));
+  assert.ok(tokenKeys.includes('keyword'));
+  for (const key of tokenKeys) {
+    assert.equal(rules.get(`.scope .${key}`), declarations(theme.style[key]), key);
+  }
+  assert.equal(
+    rules.get('.scope pre.prismjs'),
+    declarations(theme.style['pre[class*="language-"]']),
+  );
+  assert.equal(rules.size, tokenKeys.length + 1, 'no rule for a selector the inline mode never applied');
+  assert.match(rules.get('.scope pre.prismjs') ?? '', /-moz-tab-size:2;/);
 });

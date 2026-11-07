@@ -36,6 +36,7 @@ import {
   getReportedClaudeContextWindow,
   summarizeClaudeTokenUsage,
 } from '@/modules/providers/services/provider-token-usage.service.js';
+import { transcriptRowsCache } from '@/modules/providers/services/transcript-rows-cache.service.js';
 
 const PROVIDER = 'claude';
 
@@ -475,27 +476,16 @@ function replaceLaunchToolResultContent(message: AnyRecord, replacement: string)
  * The file is append-only and every row names its predecessor in `parentUuid`,
  * so a conversation is a path through it rather than the whole file. Editing a
  * sent message makes a second path appear alongside the first.
+ *
+ * Rows come from `transcriptRowsCache` and are shared between reads; see the
+ * constraint on writing onto them there.
  */
 async function readTranscriptRows(jsonlPath: string, providerSessionId: string): Promise<AnyRecord[]> {
-  const rows: AnyRecord[] = [];
-  const fileStream = fs.createReadStream(jsonlPath);
-  const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
-
-  for await (const line of rl) {
-    if (!line.trim()) {
-      continue;
-    }
-    try {
-      const entry = JSON.parse(line) as AnyRecord;
-      if (entry.sessionId === providerSessionId && !isClaudeNonTurnMessageRow(entry)) {
-        rows.push(entry);
-      }
-    } catch {
-      // A row can be half-written while the CLI is streaming into the file.
-    }
-  }
-
-  return rows;
+  return transcriptRowsCache.readRows({
+    filePath: jsonlPath,
+    filterKey: providerSessionId,
+    keep: (entry) => entry.sessionId === providerSessionId && !isClaudeNonTurnMessageRow(entry),
+  });
 }
 
 const COMPACT_SUMMARY_PREFIX = 'This session is being continued from a previous conversation';

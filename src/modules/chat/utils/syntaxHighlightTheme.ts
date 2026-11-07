@@ -69,3 +69,41 @@ export function buildSyntaxTheme(light: PrismStyleSheet, dark: PrismStyleSheet):
 function unionKeys(left: Record<string, unknown>, right: Record<string, unknown>): string[] {
   return [...new Set([...Object.keys(left), ...Object.keys(right)])];
 }
+
+// A key made only of token class names (`keyword`, `attr-name`, `a.b`). These
+// are the only keys the highlighter's inline mode ever looks up; the others are
+// full CSS selectors for Prism plugins it never applies.
+const TOKEN_CLASS_KEY = /^[\w-]+(?:\.[\w-]+)*$/;
+const PRE_KEY = 'pre[class*="language-"]';
+
+const toCssProperty = (property: string): string =>
+  property
+    .replace(/^(Moz|O|Webkit|ms)(?=[A-Z])/, (prefix) => `-${prefix.toLowerCase()}`)
+    .replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+
+const toDeclarations = (rule: Record<string, string>): string =>
+  Object.entries(rule).map(([property, value]) => `${toCssProperty(property)}:${value};`).join('');
+
+/**
+ * Used by chat's Markdown code blocks, which render with the highlighter's
+ * class mode (`useInlineStyles: false`): the same `style` written as CSS rules
+ * under `scope`, for the token classes and the `prismjs` <pre> that mode emits.
+ *
+ * The inline mode recomputes every class name in the stylesheet once per token
+ * element, which made highlighting most of the cost of showing a code block.
+ * Only the rules the inline mode would have applied are written, so the result
+ * looks the same: token rules by class, and the <pre> rule, which the caller's
+ * inline `customStyle` still overrides.
+ */
+export function buildSyntaxClassCss(style: PrismStyleSheet, scope: string): string {
+  const rules: string[] = [];
+  const preRule = style[PRE_KEY];
+  if (preRule) {
+    rules.push(`${scope} pre.prismjs{${toDeclarations(preRule)}}`);
+  }
+  for (const [key, rule] of Object.entries(style)) {
+    if (key === 'token' || !TOKEN_CLASS_KEY.test(key)) continue;
+    rules.push(`${scope} .${key}{${toDeclarations(rule)}}`);
+  }
+  return rules.join('\n');
+}

@@ -634,6 +634,7 @@ export function useChatSessionState({
     if (!container) return;
 
     const nearBottom = isNearBottom();
+    isUserScrolledUpRef.current = !nearBottom;
     setIsUserScrolledUp(!nearBottom);
     scrollPositionRef.current = {
       height: container.scrollHeight,
@@ -1155,6 +1156,34 @@ export function useChatSessionState({
     return () => container.removeEventListener('scroll', handleScroll);
   }, [handleScroll]);
 
+  // A reader following the end stays at the end while rows finish rendering:
+  // lazy rows mounting, markdown and code laying out, and a running turn's
+  // card growing all change the height without changing the message count the
+  // effect above listens to. Without this the end slid down out of view, and
+  // the next scroll event then read the reader as having scrolled up.
+  //
+  // Checked after every render because the pane can mount after this hook.
+  const followObserverRef = useRef<{ observer: ResizeObserver; target: Element } | null>(null);
+  useEffect(() => {
+    // The transcript column, always the pane's last child.
+    const target = isActive ? scrollContainerRef.current?.lastElementChild ?? null : null;
+    const current = followObserverRef.current;
+    if (current?.target === target) return;
+    current?.observer.disconnect();
+    followObserverRef.current = null;
+    if (!target || typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(() => {
+      const container = scrollContainerRef.current;
+      if (!container) return;
+      if (isUserScrolledUpRef.current || pendingScrollRestoreRef.current || searchScrollActiveRef.current) return;
+      container.scrollTop = container.scrollHeight;
+    });
+    observer.observe(target);
+    followObserverRef.current = { observer, target };
+  });
+  useEffect(() => () => followObserverRef.current?.observer.disconnect(), []);
+
   const loadAllMessages = useCallback(async () => {
     if (!isActive) return;
     if (!selectedSession || !selectedProject) return;
@@ -1229,6 +1258,9 @@ export function useChatSessionState({
   // then scroll to the row's wrapper, which is in the DOM as soon as the row
   // is inside the window, mounted or not.
   const revealMessage = useCallback((message: ChatMessage) => {
+    // Leaving the end on purpose: the rows mounted on the way must not pull
+    // the pane back down before the smooth scroll reports a position.
+    isUserScrolledUpRef.current = true;
     const index = chatMessages.indexOf(message);
     if (index >= 0) {
       setVisibleMessageCount((prev) => visibleCountToReveal(chatMessages.length, index, prev));

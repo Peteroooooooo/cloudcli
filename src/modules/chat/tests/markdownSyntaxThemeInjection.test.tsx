@@ -17,9 +17,10 @@ import { Markdown } from '@/modules/chat/transcript/Markdown';
  * the injection entirely left the suite green.
  *
  * These tests render markdown through the real <Markdown>, read the custom
- * properties the rendered code block actually references, and require the
- * injected stylesheet to declare them. They also pin the two ways the element
- * must stay unique: across many renders, and across a re-evaluation of the module.
+ * properties referenced by the injected rules that match the rendered code
+ * block, and require the injected stylesheet to declare them. They also pin the
+ * two ways the element must stay unique: across many renders, and across a
+ * re-evaluation of the module.
  */
 
 const STYLE_ELEMENT_SELECTOR = 'style#cc-syntax-theme';
@@ -28,12 +29,33 @@ const CODE_MARKDOWN = 'Intro line.\n\n```ts\nconst answer = 41;\n```\n';
 
 const renderMarkdown = () => render(<Markdown>{CODE_MARKDOWN}</Markdown>);
 
+type MatchedRule = { selector: string; declarations: string };
+
+/**
+ * The injected rules that apply to an element of the rendered block. Code
+ * blocks are coloured by class rules, not inline styles, so the variables a
+ * block needs are the ones the rules matching its elements reference.
+ */
+const matchedRules = (element: Element): MatchedRule[] => {
+  const sheet = (document.querySelector(STYLE_ELEMENT_SELECTOR) as HTMLStyleElement | null)?.sheet;
+  assert.ok(sheet, 'expected the injected syntax theme stylesheet');
+  const matched: MatchedRule[] = [];
+  for (const rule of Array.from(sheet.cssRules) as CSSStyleRule[]) {
+    if (rule.selectorText && element.matches(rule.selectorText)) {
+      matched.push({ selector: rule.selectorText, declarations: rule.style.cssText });
+    }
+  }
+  return matched;
+};
+
 /** The `--cc-syntax-N` names the rendered highlighter actually asks the page for. */
 const referencedVariables = (root: HTMLElement): Set<string> => {
   const names = new Set<string>();
-  for (const element of root.querySelectorAll('[style]')) {
-    for (const match of (element.getAttribute('style') ?? '').matchAll(/var\((--cc-syntax-\d+)\)/g)) {
-      names.add(match[1]);
+  for (const element of root.querySelectorAll('pre, pre *')) {
+    for (const rule of matchedRules(element)) {
+      for (const match of rule.declarations.matchAll(/var\((--cc-syntax-\d+)\)/g)) {
+        names.add(match[1]);
+      }
     }
   }
   return names;
@@ -76,8 +98,9 @@ test('the root block declares the property the highlighted <pre> reads its colou
 
   const pre = container.querySelector('pre');
   assert.ok(pre, 'expected the fenced block to render a highlighted <pre>');
-  const colourVariable = /color:\s*var\((--cc-syntax-\d+)\)/.exec(pre.getAttribute('style') ?? '');
-  assert.ok(colourVariable, 'expected the <pre> colour to be a --cc-syntax variable');
+  const preRule = matchedRules(pre).find((rule) => /(?:^|;)\s*color:/.test(rule.declarations));
+  const colourVariable = /(?:^|;)\s*color:\s*var\((--cc-syntax-\d+)\)/.exec(preRule?.declarations ?? '');
+  assert.ok(colourVariable, 'expected the <pre> colour to come from a rule reading a --cc-syntax variable');
 
   assert.ok(
     declaredVariables(injectedCss(), ':root').has(colourVariable[1]),

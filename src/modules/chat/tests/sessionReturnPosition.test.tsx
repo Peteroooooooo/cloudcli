@@ -54,7 +54,7 @@ function createPane() {
   const list = document.createElement('div');
   element.appendChild(list);
   let scrollTop = 0;
-  const scrollHeight = ROWS * ROW_HEIGHT;
+  let scrollHeight = ROWS * ROW_HEIGHT;
 
   Object.defineProperty(element, 'scrollHeight', { get: () => scrollHeight });
   Object.defineProperty(element, 'clientHeight', { get: () => PANE_HEIGHT });
@@ -79,7 +79,12 @@ function createPane() {
     }
   };
 
-  return { element: element as HTMLDivElement, showSession };
+  // Content below the rows finishing its layout, which only changes the height.
+  const addHeight = (extra: number) => {
+    scrollHeight += extra;
+  };
+
+  return { element: element as HTMLDivElement, showSession, addHeight };
 }
 
 function createStore(messagesBySession: Map<string, NormalizedMessage[]>) {
@@ -199,4 +204,46 @@ test('a session left at the newest message opens on the newest message again', a
 
   assert.equal(pane.element.scrollTop, ROWS * ROW_HEIGHT - PANE_HEIGHT);
   assert.equal(result.current.isUserScrolledUp, false);
+});
+
+test('a reader following the end stays there while rows below finish rendering', async () => {
+  const observers: { callback: ResizeObserverCallback; targets: Element[] }[] = [];
+  vi.stubGlobal('ResizeObserver', class {
+    private readonly entry: { callback: ResizeObserverCallback; targets: Element[] };
+    constructor(callback: ResizeObserverCallback) {
+      this.entry = { callback, targets: [] };
+      observers.push(this.entry);
+    }
+    observe(target: Element) { this.entry.targets.push(target); }
+    disconnect() { this.entry.targets = []; }
+  });
+  const grow = (pane: ReturnType<typeof createPane>, extra: number) => {
+    pane.addHeight(extra);
+    for (const observer of observers) {
+      if (observer.targets.length > 0) observer.callback([], observer as never);
+    }
+  };
+
+  const messages = new Map([[SESSION_A, buildMessages(SESSION_A)], [SESSION_B, buildMessages(SESSION_B)]]);
+  const store = createStore(messages);
+  const { result, rerender } = await renderSessions(store);
+  const pane = createPane();
+  (result.current.scrollContainerRef as { current: HTMLDivElement | null }).current = pane.element;
+
+  pane.showSession(SESSION_B);
+  act(() => rerender({ session: { id: SESSION_B } as ProjectSession }));
+  const end = () => pane.element.scrollHeight - PANE_HEIGHT;
+  assert.equal(pane.element.scrollTop, end());
+
+  // A row near the end mounts its content and grows; no message was added.
+  grow(pane, 400);
+  assert.equal(pane.element.scrollTop, end(), 'still at the end after the growth');
+
+  // Once the reader scrolls up, growth below leaves them where they are.
+  pane.element.scrollTop = 600;
+  await act(async () => {
+    await result.current.handleScroll();
+  });
+  grow(pane, 400);
+  assert.equal(pane.element.scrollTop, 600);
 });

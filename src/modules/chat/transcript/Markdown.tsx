@@ -14,7 +14,7 @@ import { normalizeLatexDelimiters } from '@/modules/chat/utils/latexDelimiters';
 import { copyTextToClipboard } from '@/shared/utils';
 import { SyntaxHighlighter } from '@/shared/syntaxHighlighter';
 import { usePaletteOps } from '@/modules/command-palette';
-import { buildSyntaxTheme } from '@/modules/chat/utils/syntaxHighlightTheme';
+import { buildSyntaxClassCss, buildSyntaxTheme } from '@/modules/chat/utils/syntaxHighlightTheme';
 import type { PrismStyleSheet } from '@/modules/chat/utils/syntaxHighlightTheme';
 import { createRenderCache } from '@/modules/chat/utils/renderCache';
 
@@ -121,7 +121,7 @@ const CodeBlock = ({ node: _node, className, children, forceBlock, ...props }: C
   }
 
   return (
-    <div className="group my-3 overflow-hidden rounded-xl border border-border bg-muted/50 shadow-sm dark:bg-zinc-900">
+    <div className={`${SYNTAX_SCOPE_CLASS} group my-3 overflow-hidden rounded-xl border border-border bg-muted/50 shadow-sm dark:bg-zinc-900`}>
       {/* Label row shares the block's background — no divider, ChatGPT-style */}
       <div className="flex items-center justify-between px-4 pt-2">
         <span className="select-none text-xs text-muted-foreground">{languageLabel}</span>
@@ -193,6 +193,7 @@ const CODE_TAG_PROPS = {
 type HighlighterRender = (props: {
   language: string;
   style: typeof syntaxTheme.style;
+  useInlineStyles: boolean;
   customStyle: React.CSSProperties;
   codeTagProps: typeof CODE_TAG_PROPS;
   children: string;
@@ -212,6 +213,9 @@ const HighlightedCode = ({ language, code }: { language: string; code: string })
     const element = renderHighlighted({
       language,
       style: syntaxTheme.style,
+      // Colours come from the scoped class rules injected below; the inline
+      // mode costs a pass over the whole stylesheet for every token.
+      useInlineStyles: false,
       customStyle: CODE_BLOCK_STYLE,
       codeTagProps: CODE_TAG_PROPS,
       children: code,
@@ -226,8 +230,10 @@ const HighlightedCode = ({ language, code }: { language: string; code: string })
  * variables and the toggle is a style recalculation instead.
  */
 const syntaxTheme = buildSyntaxTheme(oneLight as PrismStyleSheet, oneDark as PrismStyleSheet);
+const SYNTAX_SCOPE_CLASS = 'cc-syntax';
 
-// The `:root`/`.dark` declarations backing syntaxTheme.style. Injected once
+// The `:root`/`.dark` declarations backing syntaxTheme.style, and the token
+// class rules code blocks are coloured by. Injected once
 // because the values are derived from the Prism theme objects at runtime and so
 // cannot live in index.css. ThemeContext toggles `.dark` on <html>, which is
 // what repaints the tokens.
@@ -235,7 +241,7 @@ const SYNTAX_THEME_STYLE_ELEMENT_ID = 'cc-syntax-theme';
 if (!document.getElementById(SYNTAX_THEME_STYLE_ELEMENT_ID)) {
   const styleElement = document.createElement('style');
   styleElement.id = SYNTAX_THEME_STYLE_ELEMENT_ID;
-  styleElement.textContent = syntaxTheme.css;
+  styleElement.textContent = `${syntaxTheme.css}\n${buildSyntaxClassCss(syntaxTheme.style, `.${SYNTAX_SCOPE_CLASS}`)}`;
   document.head.appendChild(styleElement);
 }
 
