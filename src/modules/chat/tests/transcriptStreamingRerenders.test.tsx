@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
 import { createRef } from 'react';
-import { render } from '@testing-library/react';
+import { fireEvent, render } from '@testing-library/react';
 import { test, vi } from 'vitest';
 
 import ChatMessagesPane from '@/modules/chat/transcript/ChatMessagesPane';
@@ -11,7 +11,8 @@ import type { ChatMessage } from '@/shared/types';
 /**
  * A provider run flushes roughly ten times a second, and every flush re-renders
  * the transcript with a fresh array. Only the row that grew should cost a
- * render; the collapsed tool-call groups above it must bail out of their memo.
+ * render; the work cards above it, and the rows inside them, must bail out of
+ * their memo.
  *
  * Counted through the render-context hook every transcript row calls at the top
  * of its body, which is the cheapest place to observe "this component's body
@@ -41,13 +42,15 @@ const toolRow = (index: number, call: number): ChatMessage => ({
   toolInput: JSON.stringify({ file_path: `/src/file-${index}-${call}.ts` }),
 });
 
+// Longer than a progress note, so each batch's reply stays outside its card and
+// the history renders as one card per batch.
 const assistantRow = (index: number): ChatMessage => ({
   type: 'assistant',
-  content: `Reviewed batch ${index}.`,
+  content: `Reviewed batch ${index}. ${'Findings follow. '.repeat(25)}`,
   timestamp: new Date(Date.UTC(2026, 0, 1, 0, index, 59)).toISOString(),
 });
 
-/** Runs of same-tool calls, each long enough to collapse into one group row. */
+/** Runs of same-tool calls, each folded into one work card with a group inside. */
 function buildHistory(): ChatMessage[] {
   const rows: ChatMessage[] = [];
   for (let index = 0; index < TOOL_GROUP_COUNT; index += 1) {
@@ -115,7 +118,7 @@ const pane = (chatMessages: ChatMessage[]) => (
 );
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-test('a stream tick re-renders the growing row, not the collapsed tool groups above it', { timeout: 30_000 }, () => {
+test('a stream tick re-renders the growing row, not the work cards above it', { timeout: 30_000 }, () => {
   const history = buildHistory();
   let streaming: ChatMessage = {
     type: 'assistant',
@@ -124,10 +127,15 @@ test('a stream tick re-renders the growing row, not the collapsed tool groups ab
   };
 
   const view = render(pane([...history, streaming]));
+  const cardHeaders = view.container.querySelectorAll('.chat-message.work-run button[aria-expanded]');
+  assert.equal(cardHeaders.length, TOOL_GROUP_COUNT, 'the fixture must actually fold each batch into a card');
+  // Opened, so a card that failed to bail would re-render the rows inside it
+  // and show up in the count.
+  cardHeaders.forEach((header) => fireEvent.click(header));
   assert.equal(
     view.container.querySelectorAll('.chat-message.tool > button[aria-expanded]').length,
     TOOL_GROUP_COUNT,
-    'the fixture must actually collapse its tool runs into groups',
+    'each opened card shows its run as one tool group',
   );
 
   const perFlush: number[] = [];

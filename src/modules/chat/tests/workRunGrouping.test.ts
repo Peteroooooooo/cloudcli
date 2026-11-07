@@ -7,7 +7,7 @@ import type { TranscriptItem } from '@/modules/chat/utils/workRunGrouping';
 import type { ChatMessage, WorkRunItem } from '@/shared/types';
 
 /**
- * On a phone each turn's tool calls, reasoning and short progress notes fold
+ * Each turn's tool calls, reasoning and short progress notes fold
  * into one card, while the reply and anything the user must answer stay rows.
  */
 

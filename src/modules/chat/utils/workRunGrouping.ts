@@ -4,9 +4,9 @@ import type { MessageListItem } from '@/modules/chat/utils/toolGrouping';
 import { parseToolPayload } from '@/modules/chat/utils/messageTransforms';
 
 /**
- * Folds each turn's work into one card for the phone transcript.
+ * Folds each turn's work into one card in the transcript.
  *
- * A turn on a phone used to read as a column of tool rows, reasoning blocks and
+ * A turn used to read as a column of tool rows, reasoning blocks and
  * one-line progress notes ("let me read the config first") with the reply at the
  * bottom. Everything from the first such row up to the last tool call becomes
  * one WorkRunItem; whatever follows the last tool call — the reply, or the note
@@ -173,7 +173,7 @@ function getWorkRun(
 }
 
 /**
- * The phone transcript's rows: each stretch of work folded into a WorkRunItem,
+ * The transcript's rows: each stretch of work folded into a WorkRunItem,
  * everything else as groupConsecutiveTools would have returned it.
  *
  * A stretch is a maximal run of tool calls, reasoning and short notes. Only the

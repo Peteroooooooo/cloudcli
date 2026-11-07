@@ -905,7 +905,7 @@ export type WorkRunLatestStep =
   | { kind: 'text'; text: string };
 
 /**
- * On a phone, everything an agent did between the user's message and its reply —
+ * Everything an agent did between the user's message and its reply —
  * tool calls, reasoning and short progress notes — folded into one card. Built by
  * chat's workRunGrouping; `items` is the same run already passed through
  * groupConsecutiveTools, ready to render when the card is opened.

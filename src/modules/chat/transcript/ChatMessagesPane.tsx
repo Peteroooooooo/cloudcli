@@ -10,10 +10,9 @@ import type { BackgroundTaskSummary,
   ProviderModelActions,
   ProviderModelsDefinition } from '@/shared/types';
 import { getIntrinsicMessageKey } from '@/modules/chat/utils/messageKeys';
-import { groupConsecutiveTools, isToolGroupItem } from '@/modules/chat/utils/toolGrouping';
+import { isToolGroupItem } from '@/modules/chat/utils/toolGrouping';
 import { groupWorkRuns, isWorkRunItem } from '@/modules/chat/utils/workRunGrouping';
 import type { TranscriptItem } from '@/modules/chat/utils/workRunGrouping';
-import { useCompactLayout } from '@/shared/hooks/useCompactLayout';
 import { useLazyRowObserver } from '@/modules/chat/hooks/useLazyRowObserver';
 import LazyMessageRow from '@/modules/chat/transcript/LazyMessageRow';
 import MessageComponent from '@/modules/chat/transcript/MessageComponent';
@@ -99,7 +98,7 @@ const getGroupedMessageKey = (message: ChatMessage): string =>
 
 /**
  * Rendered by chat's ChatInterface as the scrolling transcript: the message
- * list and tool groups (on a phone, one work card per turn), the export menu, the provider empty state and the
+ * list with each turn's work folded into one card, the export menu, the provider empty state and the
  * load-all-history overlay.
  */
 function ChatMessagesPane({
@@ -152,14 +151,9 @@ function ChatMessagesPane({
 }: ChatMessagesPaneProps) {
   const { t } = useTranslation('chat');
   const lazyRows = useLazyRowObserver(scrollContainerRef);
-  // A phone has room for the conversation, not for every tool row of it, so
-  // there each turn's work folds into one card.
-  const isCompactLayout = useCompactLayout();
   const groupedVisibleMessages = useMemo<TranscriptItem[]>(
-    () => (isCompactLayout
-      ? groupWorkRuns(visibleMessages, Boolean(showThinking))
-      : groupConsecutiveTools(visibleMessages, Boolean(showThinking))),
-    [visibleMessages, showThinking, isCompactLayout],
+    () => groupWorkRuns(visibleMessages, Boolean(showThinking)),
+    [visibleMessages, showThinking],
   );
 
   // The card the agent is still working in: the last one, while nothing but

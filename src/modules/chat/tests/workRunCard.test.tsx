@@ -2,17 +2,16 @@ import assert from 'node:assert/strict';
 
 import { createRef } from 'react';
 import { fireEvent, render } from '@testing-library/react';
-import { test, vi } from 'vitest';
+import { test } from 'vitest';
 
 import ChatMessagesPane from '@/modules/chat/transcript/ChatMessagesPane';
 import { UiPreferencesProvider } from '@/shared/context/UiPreferencesContext';
 import type { ChatMessage } from '@/shared/types';
 
 /**
- * On a phone the transcript shows one work card per turn instead of its tool
+ * The transcript shows one work card per turn instead of its tool
  * rows; the reply stays a normal row and the rows appear when the card opens.
  */
-vi.mock('@/shared/hooks/useCompactLayout', () => ({ useCompactLayout: () => true }));
 
 let second = 0;
 const at = () => new Date(Date.UTC(2026, 10, 8, 10, 0, second++)).toISOString();

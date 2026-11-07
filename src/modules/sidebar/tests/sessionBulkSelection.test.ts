@@ -43,8 +43,8 @@ vi.mock('@/modules/sidebar/SessionOptions', () => ({
 // compact layout is selected through the mock rather than by resizing jsdom.
 let isCompactLayout = false;
 
-vi.mock('@/shared/hooks/useCompactLayout', () => ({
-  useCompactLayout: () => isCompactLayout,
+vi.mock('@/modules/sidebar/hooks/useCompactSidebar', () => ({
+  useCompactSidebar: () => isCompactLayout,
 }));
 
 const { default: SidebarProjectSessions } = await import('@/modules/sidebar/SidebarProjectSessions');

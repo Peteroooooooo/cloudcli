@@ -8,7 +8,7 @@ import { cn } from '@/shared/utils';
 import type { LLMProvider, Project, ProjectSession, SessionWithProvider } from '@/shared/types';
 import { useSessionForkingProviders } from '@/shared/hooks/useProviderCapabilities';
 import { PROVIDER_LABELS, createSessionViewModel, formatCompactAge } from '@/modules/sidebar/utils/sidebarProjectFormatting';
-import { useCompactLayout } from '@/shared/hooks/useCompactLayout';
+import { useCompactSidebar } from '@/modules/sidebar/hooks/useCompactSidebar';
 import { useProviderSessionIdCopy } from '@/modules/sidebar/hooks/useProviderSessionIdCopy';
 import SessionOptions from '@/modules/sidebar/SessionOptions';
 import OpenElsewhereMarker from '@/modules/sidebar/OpenElsewhereMarker';
@@ -67,7 +67,7 @@ function SidebarSessionItem({
   onToggleSessionSelected,
   t,
 }: SidebarSessionItemProps) {
-  const isCompact = useCompactLayout();
+  const isCompact = useCompactSidebar();
   const sessionView = createSessionViewModel(session, currentTime, t);
   const isSelected = selectedSession?.id === session.id;
   const compactSessionAge = formatCompactAge(sessionView.sessionTime, currentTime);

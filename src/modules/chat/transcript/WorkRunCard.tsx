@@ -60,7 +60,7 @@ function useFileChips(
 }
 
 /**
- * Rendered by chat's ChatMessagesPane on phone-sized screens in place of one
+ * Rendered by chat's ChatMessagesPane in place of one
  * turn's tool calls, reasoning and progress notes: a one-line summary (steps,
  * failures, time taken, or the step running now), the files the turn changed,
  * and the full rows when tapped open.
@@ -129,7 +129,7 @@ function WorkRunCard({
       <div className="overflow-hidden rounded-xl border border-border/60 bg-muted/30 dark:bg-muted/10">
         <button
           type="button"
-          className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left active:bg-muted/50"
+          className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-muted/40 active:bg-muted/50"
           onClick={() => setIsExpanded((current) => !current)}
           aria-expanded={isExpanded}
           aria-label={isExpanded ? t('workRun.collapse') : t('workRun.showSteps')}
@@ -171,7 +171,7 @@ function WorkRunCard({
                   key={file.path}
                   type="button"
                   title={file.path}
-                  className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border/50 bg-background/80 px-2 py-1 text-xs text-foreground active:bg-muted"
+                  className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border/50 bg-background/80 px-2 py-1 text-xs text-foreground transition-colors hover:border-border hover:bg-muted/60 active:bg-muted"
                   onClick={() => onFileOpen?.(file.path, {
                     old_string: lastEdit?.oldContent,
                     new_string: lastEdit?.newContent,
@@ -185,7 +185,7 @@ function WorkRunCard({
             {hiddenFileCount > 0 && (
               <button
                 type="button"
-                className="rounded-md px-2 py-1 text-xs text-muted-foreground active:bg-muted"
+                className="rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground active:bg-muted"
                 onClick={() => setIsExpanded(true)}
               >
                 {t('workRun.moreFiles', { count: hiddenFileCount })}
@@ -241,7 +241,7 @@ function WorkRunCard({
             </div>
             <button
               type="button"
-              className="flex w-full items-center justify-center gap-1 border-t border-border/50 py-2.5 text-xs text-muted-foreground active:bg-muted/50"
+              className="flex w-full items-center justify-center gap-1 border-t border-border/50 py-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground active:bg-muted/50"
               onClick={collapseFromBottom}
             >
               <ChevronDown className="h-3.5 w-3.5 rotate-180" aria-hidden />
