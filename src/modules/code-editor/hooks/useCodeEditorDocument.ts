@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { api, readApiJson } from '@/shared/api';
 import type { CodeEditorFile } from '@/shared/types';
+import { downloadBlob } from '@/shared/utils';
 import { isBinaryFile } from '@/modules/code-editor/utils/binaryFile';
 import { getPreviewKind } from '@/modules/code-editor/utils/previewableFile';
 
@@ -239,19 +240,24 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
   }, [canSave, content, filePath, fileProjectId]);
 
   const handleDownload = useCallback(() => {
-    const blob = new Blob([applyLineEnding(content, lineEndingRef.current)], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-
-    anchor.href = url;
-    anchor.download = file.name;
-
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-
-    URL.revokeObjectURL(url);
+    downloadBlob(new Blob([applyLineEnding(content, lineEndingRef.current)], { type: 'text/plain' }), file.name);
   }, [content, file.name]);
+
+  // Binary files have no text buffer, so the bytes come from the raw content
+  // endpoint (the one the Files tab downloads through) rather than `content`.
+  // Rejects on failure so the caller can show it.
+  const handleDownloadOriginal = useCallback(async () => {
+    if (!fileProjectId) {
+      throw new Error('Missing project identifier');
+    }
+
+    const response = await api.readFileBlob(fileProjectId, filePath);
+    if (!response.ok) {
+      throw new Error(`Failed to download file (${response.status})`);
+    }
+
+    downloadBlob(await response.blob(), fileName);
+  }, [fileName, filePath, fileProjectId]);
 
   // The baseline only changes on load and save, so it is not re-normalised on
   // every keystroke.
@@ -289,5 +295,6 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
     hasUnsavedChanges,
     handleSave,
     handleDownload,
+    handleDownloadOriginal,
   };
 };
