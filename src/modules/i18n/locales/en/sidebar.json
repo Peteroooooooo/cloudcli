@@ -201,9 +201,6 @@
     "close": "Close"
   },
   "openElsewhere": {
-    "vscode": "VS Code",
-    "cli": "CLI",
-    "other": "Other app",
     "tooltip": {
       "vscode": "Open in VS Code",
       "cli": "Open in the Claude CLI",

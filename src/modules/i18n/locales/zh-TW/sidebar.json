@@ -190,9 +190,6 @@
     "close": "關閉"
   },
   "openElsewhere": {
-    "vscode": "VS Code",
-    "cli": "CLI",
-    "other": "其他程式",
     "tooltip": {
       "vscode": "已在 VS Code 中開啟",
       "cli": "已在 Claude CLI 中開啟",

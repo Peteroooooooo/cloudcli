@@ -199,11 +199,12 @@ function SidebarSessionItem({
             {selectionIcon}
             <div
               className={cn(
-                'w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0',
+                'relative w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0',
                 isSelected ? 'bg-primary/10' : 'bg-muted/50',
               )}
             >
               <LLMProviderLogo provider={session.__provider} className="h-3 w-3" />
+              <OpenElsewhereMarker sessionId={session.id} t={t} />
             </div>
 
             <div className="min-w-0 flex-1">
@@ -232,7 +233,6 @@ function SidebarSessionItem({
                     {sessionView.messageCount}
                   </Badge>
                 )}
-                <OpenElsewhereMarker sessionId={session.id} t={t} />
               </div>
             </div>
 
@@ -445,11 +445,12 @@ function SidebarSessionItem({
             {selectionIcon}
             <div
               className={cn(
-                'flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md',
+                'relative flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md',
                 isSelected ? 'bg-primary/10' : 'bg-muted/50',
               )}
             >
               <LLMProviderLogo provider={session.__provider} className="h-3 w-3" />
+              <OpenElsewhereMarker sessionId={session.id} t={t} />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
@@ -491,7 +492,6 @@ function SidebarSessionItem({
               </div>
               <div className="mt-0.5 flex items-center gap-1.5">
                 {sessionView.messageCount > 0 && <Badge variant="secondary" className="px-1 py-0 text-xs">{sessionView.messageCount}</Badge>}
-                <OpenElsewhereMarker sessionId={session.id} t={t} />
               </div>
             </div>
           </div>

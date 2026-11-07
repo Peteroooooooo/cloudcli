@@ -8,7 +8,7 @@ import type { Project, SessionOpenElsewhere, SessionWithProvider, SidebarProject
 
 /**
  * A session open in a VS Code panel or a terminal gets a quiet label on its
- * sidebar row naming where, so the user knows a message sent from here will
+ * sidebar row (an icon badge, the tooltip naming where), so the user knows a message sent from here will
  * branch the conversation that process holds.
  */
 
@@ -56,22 +56,22 @@ const renderRow = (sessionId: string, isProcessing = false) => render(
   }),
 );
 
-test('a session open in VS Code is labelled with where it is open', () => {
+test('a session open in VS Code gets a badge saying where it is open', () => {
   const { getByTestId } = renderRow('vscode-session');
 
   const marker = getByTestId('open-elsewhere-marker');
-  assert.equal(marker.textContent, 'openElsewhere.vscode');
+  assert.equal(marker.getAttribute('data-open-in'), 'vscode');
   assert.equal(marker.getAttribute('aria-label'), 'openElsewhere.tooltip.vscode');
 });
 
 test('a busy session keeps its spinner and still says where it runs', () => {
   const { getByTestId, container } = renderRow('busy-cli-session', true);
 
-  assert.equal(getByTestId('open-elsewhere-marker').textContent, 'openElsewhere.cli');
+  assert.equal(getByTestId('open-elsewhere-marker').getAttribute('data-open-in'), 'cli');
   assert.equal(container.querySelectorAll('.animate-spin').length, 1);
 });
 
-test('a session open nowhere else has no label', () => {
+test('a session open nowhere else has no badge', () => {
   const { queryByTestId } = renderRow('closed-session');
   assert.equal(queryByTestId('open-elsewhere-marker'), null);
 });

@@ -1,42 +1,51 @@
+import { AppWindow, Code2, SquareTerminal } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { Tooltip } from '@/shared/ui';
 import { useSessionOpenElsewhere } from '@/shared/context/SessionProtectionContext';
+import type { SessionOpenElsewhere } from '@/shared/types';
+
+const ICONS: Record<SessionOpenElsewhere['openIn'], LucideIcon> = {
+  vscode: Code2,
+  cli: SquareTerminal,
+  other: AppWindow,
+};
 
 type OpenElsewhereMarkerProps = {
   sessionId: string;
-  /** Prefixes the "·" the recents row puts between its metadata items. */
-  withSeparator?: boolean;
   t: TFunction;
 };
 
 /**
- * A quiet label on a sidebar row saying the session is also open in another
- * Claude process, such as a VS Code panel. Renders nothing otherwise.
+ * A small badge on the corner of a sidebar row's agent icon saying the session
+ * is open in another Claude process, such as a VS Code panel or a terminal.
+ * Renders nothing otherwise. The parent icon box must be `relative`.
  *
  * It reads the open-elsewhere map itself, so the memoized row around it does
  * not re-render when that map changes.
  */
-export default function OpenElsewhereMarker({ sessionId, withSeparator = false, t }: OpenElsewhereMarkerProps) {
+export default function OpenElsewhereMarker({ sessionId, t }: OpenElsewhereMarkerProps) {
   const openElsewhere = useSessionOpenElsewhere(sessionId);
   if (!openElsewhere) {
     return null;
   }
 
-  const label = t(`openElsewhere.${openElsewhere.openIn}`);
+  const Icon = ICONS[openElsewhere.openIn];
   const tooltip = t(`openElsewhere.tooltip.${openElsewhere.openIn}`);
   return (
-    <>
-      {withSeparator && <span className="flex-shrink-0 text-muted-foreground/40">·</span>}
+    <span className="absolute -bottom-1 -right-1">
       <Tooltip content={tooltip} position="top">
         <span
           data-testid="open-elsewhere-marker"
+          data-open-in={openElsewhere.openIn}
+          role="img"
           aria-label={tooltip}
-          className="flex-shrink-0 whitespace-nowrap text-[10px] leading-3 text-muted-foreground"
+          className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-sky-600 text-white ring-2 ring-background dark:bg-sky-500"
         >
-          {label}
+          <Icon className="h-2.5 w-2.5" strokeWidth={2.5} />
         </span>
       </Tooltip>
-    </>
+    </span>
   );
 }
