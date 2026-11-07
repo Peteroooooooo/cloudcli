@@ -97,6 +97,12 @@ export function createProviderRuntimeService(
       return Boolean(await runtime.stopBackgroundTask?.(sessionId, taskId));
     },
 
+    async steer(providerName: LLMProvider, sessionId: string, command: string, options: AnyRecord): Promise<boolean> {
+      // A runtime that cannot write into a running turn has nothing to steer.
+      const { runtime } = dependencies.resolveProvider(providerName);
+      return Boolean(await runtime.steer?.(sessionId, command, options));
+    },
+
     hasBackgroundWork(sessionId: string): boolean {
       return dependencies.listProviders().some((provider) =>
         Boolean(provider.runtime.isHoldingSession?.(sessionId))

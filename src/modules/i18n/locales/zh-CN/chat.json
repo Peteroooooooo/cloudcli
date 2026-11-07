@@ -152,6 +152,13 @@
       "willSend": "将在当前完成后发送",
       "edit": "编辑排队消息",
       "delete": "删除排队消息"
+    },
+    "steer": {
+      "label": "插话",
+      "sending": "发送中…",
+      "willRead": "{{provider}} 会在下一次调用工具时读到",
+      "attachments_one": "附带 {{count}} 个文件",
+      "attachments_other": "附带 {{count}} 个文件"
     }
   },
   "providerSelection": {
@@ -328,5 +335,25 @@
     "customModelsOnlyHint": "在所有模型选择器中隐藏 {{provider}} 的内置模型，并将您的第一个模型设为默认模型。在您添加模型之前，内置模型仍会显示。",
     "builtInModelsHidden": "开启“仅使用我的模型”时，这些模型不会出现在模型选择器中。",
     "customModelsOnlyFailed": "无法更改此设置。"
+  },
+  "sendMenu": {
+    "trigger": "发送选项",
+    "queue": {
+      "label": "排队",
+      "descriptionResponding": "这一轮结束后发送",
+      "descriptionBackground": "后台任务结束后发送"
+    },
+    "steer": {
+      "label": "插话",
+      "description": "送进这一轮，下一次调用工具时读到"
+    },
+    "stop": {
+      "label": "停止",
+      "description": "结束正在写的回复"
+    },
+    "sendAnyway": {
+      "label": "仍然发送",
+      "description": "现在发送，会停掉后台任务"
+    }
   }
 }
