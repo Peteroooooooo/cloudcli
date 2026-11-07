@@ -202,6 +202,7 @@ export function SessionProtectionProvider({ children }: { children: ReactNode })
                 : typeof session.statusText === 'string' ? session.statusText : undefined,
               canInterrupt: typeof session.canInterrupt === 'boolean' ? session.canInterrupt : undefined,
               background: session.background === true,
+              elsewhere: OPEN_IN_VALUES.has(session.openIn),
               tasks: parseBackgroundTasks(session.tasks),
             };
           })

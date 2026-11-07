@@ -57,7 +57,7 @@ export default function StreamingMarkdown({
   return (
     <div className={className}>
       {settled && <MarkdownBody>{settled}</MarkdownBody>}
-      {pending && <MarkdownBody>{pending}</MarkdownBody>}
+      {pending && <MarkdownBody cacheable={false}>{pending}</MarkdownBody>}
     </div>
   );
 }

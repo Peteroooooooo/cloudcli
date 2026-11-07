@@ -142,6 +142,70 @@ function captureScrollRestoreState(container: HTMLDivElement): ScrollRestoreStat
   };
 }
 
+/** Distance from the end, in pixels, within which the reader counts as following the newest message. */
+const NEAR_BOTTOM_PX = 50;
+
+/** Where the reader left a transcript, so opening it again lands in the same place. */
+type TranscriptViewMemory = {
+  /** The reader was following the newest message; coming back follows whatever is newest by then. */
+  atBottom: boolean;
+  /** Timestamp of the top row on screen, the row the view is restored against. */
+  anchorTimestamp: string | null;
+  /** That row's top edge relative to the pane's top edge. */
+  anchorOffset: number;
+  /** Rows in the transcript and in the render window when this was taken. */
+  messageCount: number;
+  visibleMessageCount: number;
+};
+
+/** The pane's row wrappers in document order: one per transcript item, mounted or not. */
+const listTranscriptRows = (container: HTMLElement): HTMLElement[] =>
+  Array.from(container.querySelectorAll<HTMLElement>(':scope > div > [data-message-timestamp]'));
+
+function captureViewMemory(
+  container: HTMLDivElement,
+  messageCount: number,
+  visibleMessageCount: number,
+): TranscriptViewMemory {
+  const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < NEAR_BOTTOM_PX;
+  const memory: TranscriptViewMemory = {
+    atBottom,
+    anchorTimestamp: null,
+    anchorOffset: 0,
+    messageCount,
+    visibleMessageCount,
+  };
+  if (atBottom) return memory;
+
+  const paneTop = container.getBoundingClientRect().top;
+  const rows = listTranscriptRows(container);
+  // Rows are in visual order, so the first one still reaching into the pane is found by bisection.
+  let low = 0;
+  let high = rows.length - 1;
+  let found = -1;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    if (rows[middle].getBoundingClientRect().bottom > paneTop) {
+      found = middle;
+      high = middle - 1;
+    } else {
+      low = middle + 1;
+    }
+  }
+  if (found >= 0) {
+    memory.anchorTimestamp = rows[found].getAttribute('data-message-timestamp');
+    memory.anchorOffset = rows[found].getBoundingClientRect().top - paneTop;
+  }
+  return memory;
+}
+
+/** Render window that still reaches the remembered row once newer rows have arrived below it. */
+const restoredVisibleCount = (memory: TranscriptViewMemory | undefined, messageCount: number): number => {
+  if (!memory || memory.atBottom) return INITIAL_VISIBLE_MESSAGES;
+  const grownBy = Math.max(0, messageCount - memory.messageCount);
+  return Math.max(INITIAL_VISIBLE_MESSAGES, memory.visibleMessageCount + grownBy);
+};
+
 /* ------------------------------------------------------------------ */
 /*  Helper: Convert a ChatMessage to a NormalizedMessage for the store */
 /* ------------------------------------------------------------------ */
@@ -331,6 +395,18 @@ export function useChatSessionState({
   isActiveRef.current = isActive;
   activeSessionIdRef.current = activeSessionId;
 
+  const viewMemoryRef = useRef(new Map<string, TranscriptViewMemory>());
+  const viewMemoryFrameRef = useRef(0);
+  // The rows of a newly selected session are committed with the previous
+  // session's scroll offset still on the pane, and the scroll event that
+  // clamping fires must not be remembered as where the reader left it.
+  // Raising the flag during render closes that gap before any event runs.
+  const viewedSessionIdRef = useRef(activeSessionId);
+  if (viewedSessionIdRef.current !== activeSessionId) {
+    viewedSessionIdRef.current = activeSessionId;
+    pendingInitialScrollRef.current = true;
+  }
+
   const latestRefreshExecutorRef = useRef<(sessionId: string) => Promise<boolean | void>>(
     async () => true,
   );
@@ -416,6 +492,29 @@ export function useChatSessionState({
     return all;
   }, [storeMessages, pendingUserMessage]);
 
+  const messageCountRef = useRef(chatMessages.length);
+  messageCountRef.current = chatMessages.length;
+  const visibleMessageCountRef = useRef(visibleMessageCount);
+  visibleMessageCountRef.current = visibleMessageCount;
+
+  // Taken from scroll events, at most once a frame. Nothing is recorded while
+  // a session is still being brought to its opening position.
+  const rememberView = useCallback(() => {
+    if (viewMemoryFrameRef.current) return;
+    viewMemoryFrameRef.current = requestAnimationFrame(() => {
+      viewMemoryFrameRef.current = 0;
+      const container = scrollContainerRef.current;
+      const sessionId = activeSessionIdRef.current;
+      if (!container || !sessionId || pendingInitialScrollRef.current || messageCountRef.current === 0) return;
+      viewMemoryRef.current.set(
+        sessionId,
+        captureViewMemory(container, messageCountRef.current, visibleMessageCountRef.current),
+      );
+    });
+  }, []);
+
+  useEffect(() => () => cancelAnimationFrame(viewMemoryFrameRef.current), []);
+
   /* ---------------------------------------------------------------- */
   /*  addMessage                                                       */
   /* ---------------------------------------------------------------- */
@@ -460,7 +559,7 @@ export function useChatSessionState({
     const container = scrollContainerRef.current;
     if (!container) return false;
     const { scrollTop, scrollHeight, clientHeight } = container;
-    return scrollHeight - scrollTop - clientHeight < 50;
+    return scrollHeight - scrollTop - clientHeight < NEAR_BOTTOM_PX;
   }, []);
 
   const loadOlderMessages = useCallback(
@@ -540,9 +639,10 @@ export function useChatSessionState({
       height: container.scrollHeight,
       top: container.scrollTop,
     };
+    rememberView();
 
     await revealOlderHistory(container);
-  }, [isActive, isNearBottom, revealOlderHistory]);
+  }, [isActive, isNearBottom, rememberView, revealOlderHistory]);
 
   // Scroll events alone are not enough: a loaded page whose turns fold into a
   // few cards may not fill the screen, and a pane that cannot scroll fires no
@@ -585,8 +685,10 @@ export function useChatSessionState({
     }
   }, [chatMessages.length, isActive, isUserScrolledUp, visibleMessageCount]);
 
-  // Reset scroll/pagination state on session change
-  useEffect(() => {
+  // Reset scroll/pagination state on session change. A layout effect so the
+  // restored render window is committed before the first frame of the new
+  // session is painted.
+  useLayoutEffect(() => {
     // A search jump belongs to the transcript it was requested against. Left
     // armed across a session change it did two visible things to the session
     // the user actually opened: the initial scroll bailed (it declines while a
@@ -605,22 +707,26 @@ export function useChatSessionState({
     setSearchTarget(null);
 
     pendingInitialScrollRef.current = true;
-    setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
+    // A session read part-way up comes back with the rows the reader was on
+    // still inside the render window; one left at the end opens on the newest.
+    const memory = selectedSession?.id ? viewMemoryRef.current.get(selectedSession.id) : undefined;
+    setVisibleMessageCount(restoredVisibleCount(memory, messageCountRef.current));
     pendingScrollRestoreRef.current = null;
-    setIsUserScrolledUp(false);
+    const scrolledUp = Boolean(memory && !memory.atBottom);
+    isUserScrolledUpRef.current = scrolledUp;
+    setIsUserScrolledUp(scrolledUp);
   }, [selectedProject?.projectId, selectedSession?.id]);
 
-  // Initial scroll to bottom — robust to lazy content reflow.
-  // The previous implementation fired one scrollToBottom() at +200ms and
-  // cleared the pending flag. When markdown blocks, code highlighting, or
-  // images finished rendering after that window, scrollHeight grew but
-  // nothing re-anchored the viewport, leaving the chat tab visually
-  // "scrolled way up" with the latest assistant message off-screen.
+  // Opening position: the row the reader was on when they left this session,
+  // or the newest message.
   //
-  // This version re-scrolls every animation frame while scrollHeight is
-  // still growing, capped at ~1s (60 frames) or 3 consecutive stable
-  // frames. Cancels cleanly on session change via the pending flag.
-  useEffect(() => {
+  // Lazy content (markdown, code highlighting, images) keeps changing heights
+  // for a while after the first commit, so the position is re-applied every
+  // animation frame until scrollHeight holds for 3 frames, capped at ~1s (60
+  // frames). The first application runs before paint, so a session switch
+  // never shows a frame at the previous session's offset. Cancels cleanly on
+  // session change via the pending flag.
+  useLayoutEffect(() => {
     if (!isActive) return;
     if (!pendingInitialScrollRef.current || !scrollContainerRef.current || isLoadingSessionMessages) return;
     // An empty list right after opening is usually the page still on its way;
@@ -629,14 +735,28 @@ export function useChatSessionState({
     if (searchScrollActiveRef.current) { pendingInitialScrollRef.current = false; return; }
 
     const container = scrollContainerRef.current;
+    const memory = activeSessionIdRef.current ? viewMemoryRef.current.get(activeSessionIdRef.current) : undefined;
+    const anchorTimestamp = memory && !memory.atBottom ? memory.anchorTimestamp : null;
     let frame = 0;
     let lastHeight = 0;
     let stableCount = 0;
     let rafId = 0;
 
+    const place = () => {
+      const anchor = anchorTimestamp
+        ? listTranscriptRows(container).find((row) => row.getAttribute('data-message-timestamp') === anchorTimestamp)
+        : undefined;
+      if (anchor && memory) {
+        const offset = anchor.getBoundingClientRect().top - container.getBoundingClientRect().top;
+        container.scrollTop += offset - memory.anchorOffset;
+        return;
+      }
+      container.scrollTop = container.scrollHeight;
+    };
+
     const tick = () => {
       if (!pendingInitialScrollRef.current || !scrollContainerRef.current) return;
-      container.scrollTop = container.scrollHeight;
+      place();
       if (container.scrollHeight === lastHeight) {
         stableCount++;
       } else {
@@ -648,14 +768,19 @@ export function useChatSessionState({
         rafId = requestAnimationFrame(tick);
       } else {
         pendingInitialScrollRef.current = false;
+        // The remembered row can be gone (an edit truncated the transcript);
+        // the reader is then at the end and should follow it.
+        const following = isNearBottom();
+        isUserScrolledUpRef.current = !following;
+        setIsUserScrolledUp(!following);
         void revealOlderHistory(container);
       }
     };
-    rafId = requestAnimationFrame(tick);
+    tick();
     return () => {
       if (rafId) cancelAnimationFrame(rafId);
     };
-  }, [chatMessages.length, isActive, isLoadingSessionMessages, revealOlderHistory, scrollToBottom]);
+  }, [chatMessages.length, isActive, isLoadingSessionMessages, isNearBottom, revealOlderHistory, visibleMessageCount]);
 
   // Session replay/subscription remains active regardless of which main tab is
   // visible. Only persisted-history HTTP traffic is visibility-gated below.
@@ -735,15 +860,6 @@ export function useChatSessionState({
       resetStreamingState();
     }
 
-    // Reset pagination/scroll state
-    messagesOffsetRef.current = 0;
-    setHasMoreMessages(false);
-    setTotalMessages(0);
-    setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
-    setAllMessagesLoaded(false);
-    allMessagesLoadedRef.current = false;
-    setIsLoadingAllMessages(false);
-
     if (sessionChanged) {
       setTokenBudget(null);
     }
@@ -751,6 +867,37 @@ export function useChatSessionState({
     setCurrentSessionId(selectedSessionId);
 
     lastLoadedSessionKeyRef.current = sessionKey;
+
+    const restoredCount = restoredVisibleCount(
+      viewMemoryRef.current.get(selectedSessionId),
+      messageCountRef.current,
+    );
+
+    // A session opened before keeps its rows in the store. Showing them at
+    // once and asking only for what is new keeps a switch back from
+    // replacing everything with the newest 20 rows, re-measuring the whole
+    // pane and losing the reader's place.
+    if (existingSlot?.fetchedAt && existingSlot.status !== 'loading' && sessionStore.getMessages(selectedSessionId).length > 0) {
+      messagesOffsetRef.current = existingSlot.offset;
+      setHasMoreMessages(existingSlot.hasMore);
+      setTotalMessages(existingSlot.total);
+      setVisibleMessageCount(restoredCount);
+      allMessagesLoadedRef.current = !existingSlot.hasMore;
+      setAllMessagesLoaded(!existingSlot.hasMore);
+      setIsLoadingAllMessages(false);
+      setIsLoadingSessionMessages(false);
+      void requestLatestMessages(selectedSessionId);
+      return;
+    }
+
+    // Reset pagination/scroll state
+    messagesOffsetRef.current = 0;
+    setHasMoreMessages(false);
+    setTotalMessages(0);
+    setVisibleMessageCount(restoredCount);
+    setAllMessagesLoaded(false);
+    allMessagesLoadedRef.current = false;
+    setIsLoadingAllMessages(false);
 
     // Fetch from server → store updates → chatMessages re-derives automatically
     setIsLoadingSessionMessages(true);

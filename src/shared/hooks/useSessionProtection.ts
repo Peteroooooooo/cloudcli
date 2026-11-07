@@ -23,6 +23,7 @@ const sessionActivitiesMatch = (left: SessionActivity, right: SessionActivity): 
   && left.canInterrupt === right.canInterrupt
   && left.startedAt === right.startedAt
   && Boolean(left.background) === Boolean(right.background)
+  && Boolean(left.elsewhere) === Boolean(right.elsewhere)
   && backgroundTasksKey(left.tasks) === backgroundTasksKey(right.tasks);
 
 const sessionActivityMapsMatch = (
@@ -112,6 +113,13 @@ export function useSessionProtection() {
         return prev;
       }
 
+      // The subscribe ack reports CloudCLI's own run only. For a turn in a VS
+      // Code panel it always says idle, and dropping the entry on it showed
+      // the session as finished for up to one poll each time it was opened.
+      if (opts?.onlyOwnRuns && existing.elsewhere) {
+        return prev;
+      }
+
       // Guard against stale `chat_subscribed` idle acks: if a new request
       // started after the subscribe was sent, the idle ack describes the
       // older request and must not clear the newer one.
@@ -194,6 +202,7 @@ export function useSessionProtection() {
           canInterrupt: snapshot.canInterrupt ?? existing?.canInterrupt ?? true,
           startedAt: snapshotStartedAt ?? existing?.startedAt ?? now,
           ...(snapshot.background ? { background: true } : {}),
+          ...(snapshot.elsewhere ? { elsewhere: true } : {}),
           ...(snapshot.tasks ? { tasks: snapshot.tasks } : {}),
         });
       }

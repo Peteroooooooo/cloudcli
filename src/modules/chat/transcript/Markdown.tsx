@@ -16,12 +16,19 @@ import { SyntaxHighlighter } from '@/shared/syntaxHighlighter';
 import { usePaletteOps } from '@/modules/command-palette';
 import { buildSyntaxTheme } from '@/modules/chat/utils/syntaxHighlightTheme';
 import type { PrismStyleSheet } from '@/modules/chat/utils/syntaxHighlightTheme';
+import { createRenderCache } from '@/modules/chat/utils/renderCache';
 
 type MarkdownProps = {
   children: React.ReactNode;
   className?: string;
   /** Render single newlines as hard line breaks (for user-typed messages). */
   breaks?: boolean;
+  /**
+   * Keep the rendered result for the next time the same text is shown. Off for
+   * text that is still being written, which would only push finished messages
+   * out of the cache.
+   */
+  cacheable?: boolean;
 };
 
 // Links to the wider web (or in-page anchors) keep normal browser navigation;
@@ -160,31 +167,58 @@ const CodeBlock = ({ node: _node, className, children, forceBlock, ...props }: C
         </button>
       </div>
 
-      <SyntaxHighlighter
-        language={language}
-        style={syntaxTheme.style}
-        customStyle={{
-          margin: 0,
-          borderRadius: 0,
-          fontSize: '0.8125rem',
-          lineHeight: 1.6,
-          padding: '0.5rem 1rem 1rem',
-          // The container owns the background so the label row and code read as one panel.
-          background: 'transparent',
-        }}
-        codeTagProps={{
-          style: {
-            fontFamily:
-              'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-            background: 'transparent',
-          },
-        }}
-      >
-        {raw}
-      </SyntaxHighlighter>
+      <HighlightedCode language={language} code={raw} />
     </div>
   );
 };
+
+const CODE_BLOCK_STYLE: React.CSSProperties = {
+  margin: 0,
+  borderRadius: 0,
+  fontSize: '0.8125rem',
+  lineHeight: 1.6,
+  padding: '0.5rem 1rem 1rem',
+  // The container owns the background so the label row and code read as one panel.
+  background: 'transparent',
+};
+
+const CODE_TAG_PROPS = {
+  style: {
+    fontFamily:
+      'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    background: 'transparent',
+  },
+};
+
+type HighlighterRender = (props: {
+  language: string;
+  style: typeof syntaxTheme.style;
+  customStyle: React.CSSProperties;
+  codeTagProps: typeof CODE_TAG_PROPS;
+  children: string;
+}) => React.ReactElement;
+
+// The highlighter is a plain function with no hooks. Calling it directly gives
+// its output as an element that can be kept, so a code block shown again
+// (switching back to a session) is not tokenized by Prism a second time.
+const renderHighlighted = SyntaxHighlighter as unknown as HighlighterRender;
+const highlightedCodeCache = createRenderCache<React.ReactElement>(300);
+
+const HighlightedCode = ({ language, code }: { language: string; code: string }) =>
+  useMemo(() => {
+    const key = `${language}\u0000${code}`;
+    const cached = highlightedCodeCache.get(key);
+    if (cached) return cached;
+    const element = renderHighlighted({
+      language,
+      style: syntaxTheme.style,
+      customStyle: CODE_BLOCK_STYLE,
+      codeTagProps: CODE_TAG_PROPS,
+      children: code,
+    });
+    highlightedCodeCache.set(key, element);
+    return element;
+  }, [language, code]);
 
 /**
  * One style object for both themes: switching between the two Prism objects
@@ -258,7 +292,7 @@ const markdownComponents = {
  * render model-authored markdown with this module's shared prose styling,
  * code highlighting and table rules.
  */
-function MarkdownBodyRenderer({ children, breaks = false }: Omit<MarkdownProps, 'className'>) {
+function MarkdownBodyRenderer({ children, breaks = false, cacheable = true }: Omit<MarkdownProps, 'className'>) {
   const content = useMemo(
     // The LaTeX pass runs second because it reads the code spans the fence pass
     // normalizes, and must leave the LaTeX inside them literal.
@@ -333,12 +367,25 @@ function MarkdownBodyRenderer({ children, breaks = false }: Omit<MarkdownProps, 
     [openFileInEditor, openDirectory],
   );
 
-  return (
-    <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components as any}>
-      {content}
-    </ReactMarkdown>
-  );
+  return useMemo(() => {
+    const key = `${breaks ? 1 : 0}${hasMath ? 1 : 0}\u0000${content}`;
+    const cached = cacheable ? markdownRenderCache.get(key) : undefined;
+    if (cached) return cached;
+    // `ReactMarkdown` is synchronous and hook-free, so calling it yields the
+    // element tree to keep. Its file-link handlers reach the editor through the
+    // palette's ref, so a kept tree stays valid for every later mount.
+    const element = ReactMarkdown({
+      remarkPlugins,
+      rehypePlugins,
+      components: components as any,
+      children: content,
+    });
+    if (cacheable) markdownRenderCache.set(key, element);
+    return element;
+  }, [breaks, cacheable, components, content, hasMath, rehypePlugins, remarkPlugins]);
 }
+
+const markdownRenderCache = createRenderCache<React.ReactElement>(600);
 
 /**
  * Markdown blocks without the prose wrapper. Used by StreamingMarkdown so a

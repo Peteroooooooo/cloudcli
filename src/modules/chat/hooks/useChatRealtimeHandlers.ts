@@ -190,6 +190,7 @@ export function useChatRealtimeHandlers({
             // subscribe was sent — the ack describes the older state.
             onSessionIdle?.(sid, {
               ifStartedBefore: statusCheckSentAtRef.current.get(sid),
+              onlyOwnRuns: true,
             });
           }
 

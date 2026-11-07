@@ -221,6 +221,12 @@ export type SessionActivity = {
   background?: boolean;
   /** The background tasks the session still has running, with or without a response in flight. */
   tasks?: BackgroundTaskSummary[];
+  /**
+   * Set when the turn runs in another Claude process (a VS Code panel, a
+   * terminal). CloudCLI has no run of its own for it, so only the poll that
+   * reported it can say when it ends.
+   */
+  elsewhere?: boolean;
 };
 
 /** Every busy session, keyed by session id. Read it to tell whether a session is busy; check `background` to tell how. */
@@ -232,10 +238,14 @@ export type MarkSessionProcessing = (
   activity?: { statusText?: string | null; canInterrupt?: boolean },
 ) => void;
 
-/** Marks a session's response as finished; `ifStartedBefore` lets a late acknowledgement clear only a stale run. Leaves background-only work alone, which it says nothing about. */
+/**
+ * Marks a session's response as finished; `ifStartedBefore` lets a late acknowledgement clear only a stale run.
+ * Leaves background-only work alone, which it says nothing about; `onlyOwnRuns` also leaves a turn running in
+ * another Claude process alone, for callers that only know about CloudCLI's own runs.
+ */
 export type MarkSessionIdle = (
   sessionId?: string | null,
-  opts?: { ifStartedBefore?: number },
+  opts?: { ifStartedBefore?: number; onlyOwnRuns?: boolean },
 ) => void;
 
 /** Records the background tasks a session still has once its turn ended; an empty list marks it idle. */
@@ -264,6 +274,8 @@ export type SessionActivitySnapshot = {
   /** True when the server lists the session for its background tasks alone, with no chat run. */
   background?: boolean;
   tasks?: BackgroundTaskSummary[];
+  /** True when the turn belongs to another Claude process rather than a CloudCLI run. */
+  elsewhere?: boolean;
 };
 
 /**
