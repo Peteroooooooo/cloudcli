@@ -5,7 +5,7 @@ import { Button } from '@/shared/ui';
 import { cn } from '@/shared/utils';
 import type { LLMProvider, Project, ProjectSession, SessionWithProvider, SidebarSessionSelection } from '@/shared/types';
 import SidebarSessionItem from '@/modules/sidebar/SidebarSessionItem';
-import { useCompactSidebar } from '@/modules/sidebar/hooks/useCompactSidebar';
+import { useCompactLayout } from '@/shared/hooks/useCompactLayout';
 
 type SidebarProjectSessionsProps = {
   project: Project;
@@ -91,7 +91,7 @@ export default function SidebarProjectSessions({
   onDeleteSelectedSessions,
   t,
 }: SidebarProjectSessionsProps) {
-  const isCompact = useCompactSidebar();
+  const isCompact = useCompactLayout();
 
   if (!isExpanded) {
     return null;

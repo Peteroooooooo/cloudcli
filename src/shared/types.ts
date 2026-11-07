@@ -892,6 +892,37 @@ export type ToolGroupItem = {
   preview: string;
 };
 
+/** A file one turn's edit tools changed, with every successful edit in call order, for the work card's file chips. */
+export type WorkRunFile = {
+  path: string;
+  edits: { oldContent: string; newContent: string }[];
+};
+
+/** What a work card's one-line live status names: the newest visible step of the run. */
+export type WorkRunLatestStep =
+  | { kind: 'tool'; toolName: string; detail: string }
+  | { kind: 'thinking' }
+  | { kind: 'text'; text: string };
+
+/**
+ * On a phone, everything an agent did between the user's message and its reply —
+ * tool calls, reasoning and short progress notes — folded into one card. Built by
+ * chat's workRunGrouping; `items` is the same run already passed through
+ * groupConsecutiveTools, ready to render when the card is opened.
+ */
+export type WorkRunItem = {
+  _isWorkRun: true;
+  messages: ChatMessage[];
+  items: (ChatMessage | ToolGroupItem)[];
+  timestamp: ChatMessage['timestamp'];
+  stepCount: number;
+  errorCount: number;
+  /** Milliseconds from the run's first row to the row after it (its reply), or null when unknown. */
+  durationMs: number | null;
+  latestStep: WorkRunLatestStep | null;
+  files: WorkRunFile[];
+};
+
 /** One line of a rendered file diff, marked 'added' or 'removed', with its text and line number. */
 export type DiffLine = {
   type: 'added' | 'removed';

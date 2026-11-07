@@ -11,11 +11,15 @@ import type { BackgroundTaskSummary,
   ProviderModelsDefinition } from '@/shared/types';
 import { getIntrinsicMessageKey } from '@/modules/chat/utils/messageKeys';
 import { groupConsecutiveTools, isToolGroupItem } from '@/modules/chat/utils/toolGrouping';
+import { groupWorkRuns, isWorkRunItem } from '@/modules/chat/utils/workRunGrouping';
+import type { TranscriptItem } from '@/modules/chat/utils/workRunGrouping';
+import { useCompactLayout } from '@/shared/hooks/useCompactLayout';
 import { useLazyRowObserver } from '@/modules/chat/hooks/useLazyRowObserver';
 import LazyMessageRow from '@/modules/chat/transcript/LazyMessageRow';
 import MessageComponent from '@/modules/chat/transcript/MessageComponent';
 import ProviderSelectionEmptyState from '@/modules/chat/transcript/ProviderSelectionEmptyState';
 import ToolGroupContainer from '@/modules/chat/transcript/ToolGroupContainer';
+import WorkRunCard from '@/modules/chat/transcript/WorkRunCard';
 import LoadAllMessagesOverlay from '@/modules/chat/transcript/LoadAllMessagesOverlay';
 import ChatExportMenu from '@/modules/chat/transcript/ChatExportMenu';
 import { BackgroundTasksStrip } from '@/modules/chat/transcript/BackgroundTasksStrip';
@@ -95,7 +99,7 @@ const getGroupedMessageKey = (message: ChatMessage): string =>
 
 /**
  * Rendered by chat's ChatInterface as the scrolling transcript: the message
- * list and tool groups, the export menu, the provider empty state and the
+ * list and tool groups (on a phone, one work card per turn), the export menu, the provider empty state and the
  * load-all-history overlay.
  */
 function ChatMessagesPane({
@@ -148,10 +152,27 @@ function ChatMessagesPane({
 }: ChatMessagesPaneProps) {
   const { t } = useTranslation('chat');
   const lazyRows = useLazyRowObserver(scrollContainerRef);
-  const groupedVisibleMessages = useMemo(
-    () => groupConsecutiveTools(visibleMessages, Boolean(showThinking)),
-    [visibleMessages, showThinking],
+  // A phone has room for the conversation, not for every tool row of it, so
+  // there each turn's work folds into one card.
+  const isCompactLayout = useCompactLayout();
+  const groupedVisibleMessages = useMemo<TranscriptItem[]>(
+    () => (isCompactLayout
+      ? groupWorkRuns(visibleMessages, Boolean(showThinking))
+      : groupConsecutiveTools(visibleMessages, Boolean(showThinking))),
+    [visibleMessages, showThinking, isCompactLayout],
   );
+
+  // The card the agent is still working in: the last one, while nothing but
+  // its own progress notes has come after it.
+  const liveWorkRunIndex = useMemo(() => {
+    if (!isProcessing) return -1;
+    for (let index = groupedVisibleMessages.length - 1; index >= 0; index -= 1) {
+      const item = groupedVisibleMessages[index];
+      if (isWorkRunItem(item)) return index;
+      if (isToolGroupItem(item) || item.type !== 'assistant' || item.isToolUse) return -1;
+    }
+    return -1;
+  }, [groupedVisibleMessages, isProcessing]);
 
   // Stable, deterministic keys for the messages rendered this pass.
   //
@@ -170,7 +191,7 @@ function ChatMessagesPane({
       keys.set(message, seen === 0 ? intrinsicKey : `${intrinsicKey}__${seen}`);
     };
     for (const item of groupedVisibleMessages) {
-      if (isToolGroupItem(item)) {
+      if (isToolGroupItem(item) || isWorkRunItem(item)) {
         item.messages.forEach(assign);
       } else {
         assign(item);
@@ -308,6 +329,35 @@ function ChatMessagesPane({
               // initial scroll-to-bottom measures real heights; older rows
               // start as placeholders and mount when scrolled toward.
               const initiallyNearViewport = index >= rowCount - INITIAL_MOUNTED_TAIL_ROWS;
+
+              if (isWorkRunItem(item)) {
+                const runPrevMessage = prevMessage;
+                prevMessage = item.messages[item.messages.length - 1] || prevMessage;
+
+                return (
+                  <LazyMessageRow
+                    key={`work-run-${getMessageKey(item.messages[0])}`}
+                    lazyRows={lazyRows}
+                    timestamp={item.timestamp}
+                    initiallyNearViewport={initiallyNearViewport}
+                  >
+                    <WorkRunCard
+                      run={item}
+                      prevMessage={runPrevMessage}
+                      isLive={index === liveWorkRunIndex}
+                      createDiff={createDiff}
+                      getMessageKey={getGroupedMessageKey}
+                      onFileOpen={onFileOpen}
+                      onShowSettings={onShowSettings}
+                      onGrantToolPermission={onGrantToolPermission}
+                      showRawParameters={showRawParameters}
+                      showThinking={showThinking}
+                      selectedProject={selectedProject}
+                      provider={provider}
+                    />
+                  </LazyMessageRow>
+                );
+              }
 
               if (isToolGroupItem(item)) {
                 const groupPrevMessage = prevMessage;

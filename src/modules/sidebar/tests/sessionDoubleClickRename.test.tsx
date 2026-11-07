@@ -4,7 +4,7 @@ import React from 'react';
 import { test, vi } from 'vitest';
 import type { Project, SessionWithProvider, SidebarProjectListProps } from '@/shared/types';
 
-vi.mock('@/modules/sidebar/hooks/useCompactSidebar', () => ({ useCompactSidebar: () => false }));
+vi.mock('@/shared/hooks/useCompactLayout', () => ({ useCompactLayout: () => false }));
 vi.mock('@/modules/sidebar/SessionOptions', () => ({ default: () => null }));
 const { default: SidebarSessionItem } = await import('@/modules/sidebar/SidebarSessionItem');
 const project = { projectId: 'project-1', name: 'project', fullPath: '/tmp/project', sessions: [] } as unknown as Project;

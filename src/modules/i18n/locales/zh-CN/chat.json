@@ -308,6 +308,19 @@
     "cancel": "取消定时消息",
     "dismiss": "关闭失败提示"
   },
+  "workRun": {
+    "working": "正在处理",
+    "done": "已处理",
+    "steps_other": "{{count}} 步",
+    "failed_other": "{{count}} 步出错",
+    "thinking": "思考中",
+    "seconds": "{{s}} 秒",
+    "minutes": "{{m}} 分 {{s}} 秒",
+    "hours": "{{h}} 小时 {{m}} 分",
+    "moreFiles": "另 {{count}} 个文件",
+    "showSteps": "展开处理过程",
+    "collapse": "收起"
+  },
   "modelLibrary": {
     "effortLevels": "推理级别",
     "effortLevelsHint": "选择此模型支持的推理强度级别。若未选择任何级别，将无法在输入框中为此模型选择级别。",

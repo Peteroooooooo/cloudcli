@@ -8,7 +8,7 @@ import type { LLMProvider, MCPServerStatus, Project, ProjectSession, SessionWith
 import { getTaskIndicatorStatus } from '@/modules/sidebar/utils/sidebarProjectFormatting';
 import TaskIndicator from '@/modules/sidebar/TaskIndicator';
 import SidebarProjectSessions from '@/modules/sidebar/SidebarProjectSessions';
-import { useCompactSidebar } from '@/modules/sidebar/hooks/useCompactSidebar';
+import { useCompactLayout } from '@/shared/hooks/useCompactLayout';
 
 type SidebarProjectItemProps = {
   project: Project;
@@ -137,7 +137,7 @@ function SidebarProjectItem({
     };
   }, [isEditing]);
 
-  const isCompact = useCompactSidebar();
+  const isCompact = useCompactLayout();
 
   const toggleProject = () => onToggleProject(project.projectId);
   const toggleStarProject = () => onToggleStarProject(project.projectId);

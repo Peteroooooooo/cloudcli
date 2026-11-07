@@ -8,8 +8,8 @@ import { test, vi } from 'vitest';
 import SidebarSessionItem from '@/modules/sidebar/SidebarSessionItem';
 import type { LLMProvider, Project, SessionWithProvider } from '@/shared/types';
 
-vi.mock('@/modules/sidebar/hooks/useCompactSidebar', () => ({
-  useCompactSidebar: () => true,
+vi.mock('@/shared/hooks/useCompactLayout', () => ({
+  useCompactLayout: () => true,
 }));
 
 // Exercise the real shared capability hook: the mobile menu must follow the

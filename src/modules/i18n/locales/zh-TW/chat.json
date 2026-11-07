@@ -327,6 +327,19 @@
     "cancel": "取消排程訊息",
     "dismiss": "關閉失敗提示"
   },
+  "workRun": {
+    "working": "正在處理",
+    "done": "已處理",
+    "steps_other": "{{count}} 步",
+    "failed_other": "{{count}} 步出錯",
+    "thinking": "思考中",
+    "seconds": "{{s}} 秒",
+    "minutes": "{{m}} 分 {{s}} 秒",
+    "hours": "{{h}} 小時 {{m}} 分",
+    "moreFiles": "另 {{count}} 個檔案",
+    "showSteps": "展開處理過程",
+    "collapse": "收起"
+  },
   "modelLibrary": {
     "effortLevels": "推理等級",
     "effortLevelsHint": "選擇此模型支援的推理強度等級。若未選擇任何等級，將無法在輸入框中為此模型選擇等級。",

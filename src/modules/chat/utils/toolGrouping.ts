@@ -1,4 +1,4 @@
-import type { ChatMessage, ToolGroupItem } from '@/shared/types';
+import type { ChatMessage, ToolGroupItem, WorkRunItem } from '@/shared/types';
 import { getToolConfig } from '@/modules/chat/tools/configs/toolConfigs';
 
 export const TOOL_GROUP_THRESHOLD = 2;
@@ -52,7 +52,7 @@ function getToolGroup(run: GroupableToolRun, showThinking: boolean): ToolGroupIt
   return group;
 }
 
-export function isToolGroupItem(item: MessageListItem): item is ToolGroupItem {
+export function isToolGroupItem(item: MessageListItem | WorkRunItem): item is ToolGroupItem {
   return '_isGroup' in item && (item as ToolGroupItem)._isGroup === true;
 }
 
@@ -81,7 +81,8 @@ function parseToolInput(toolInput: unknown): unknown {
   }
 }
 
-function getToolInputPreview(message: ChatMessage): string {
+/** The one-line text a tool call's config names it by: a path, a pattern, a command. Also used by workRunGrouping for a work card's live status. */
+export function getToolInputPreview(message: ChatMessage): string {
   const config = getToolConfig(message.toolName || 'UnknownTool').input;
   const parsedInput = parseToolInput(message.toolInput);
   const title = typeof config.title === 'function' ? config.title(parsedInput) : config.title;

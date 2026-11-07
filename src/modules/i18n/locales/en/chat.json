@@ -429,6 +429,21 @@
     "escClosesModal": "Esc closes the modal.",
     "close": "Close"
   },
+  "workRun": {
+    "working": "Working",
+    "done": "Worked",
+    "steps_one": "{{count}} step",
+    "steps_other": "{{count}} steps",
+    "failed_one": "{{count}} failed",
+    "failed_other": "{{count}} failed",
+    "thinking": "Thinking",
+    "seconds": "{{s}}s",
+    "minutes": "{{m}}m {{s}}s",
+    "hours": "{{h}}h {{m}}m",
+    "moreFiles": "+{{count}} files",
+    "showSteps": "Show the steps",
+    "collapse": "Collapse"
+  },
   "modelLibrary": {
     "effortLevels": "Reasoning levels",
     "effortLevelsHint": "Select the reasoning-effort levels this model accepts. If none are selected, no effort level can be chosen for this model in the composer.",
