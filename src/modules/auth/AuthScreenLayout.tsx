@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { AppLogo } from '@/shared/ui';
 import { IS_PLATFORM } from '@/shared/utils';
 
 type AuthScreenLayoutProps = {
@@ -36,9 +37,7 @@ export default function AuthScreenLayout({
           <div className="text-center">
             <div className="mb-5 flex justify-center">
               {logo ?? (
-                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-primary/80 shadow-lg shadow-primary/25 ring-1 ring-inset ring-white/20">
-                  <img src="/logo.svg" alt="CloudCLI" className="h-9 w-9" />
-                </div>
+                <AppLogo className="h-16 w-16 shadow-lg" />
               )}
             </div>
             <h1 className="font-serif text-3xl font-bold tracking-tight text-foreground">{title}</h1>
