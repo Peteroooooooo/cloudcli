@@ -47,38 +47,40 @@ function describeBackgroundTasks(allTasks: BackgroundTaskSummary[], t: TFunction
  */
 export default function ActivityIndicator({ activity, onAbort, isInputFocused = false }: ActivityIndicatorProps) {
   const { t } = useTranslation('chat');
-  const [renderedActivity, setRenderedActivity] = useState<SessionActivity | null>(activity);
-  const [isExiting, setIsExiting] = useState(false);
-  const startedAt = renderedActivity?.startedAt ?? null;
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  // The last activity shown, kept for the exit animation after `activity` clears.
+  const [lastActivity, setLastActivity] = useState<SessionActivity | null>(activity);
+  // Slides in only when work starts while this session is on screen. Opening a
+  // session that is already working shows the tab in place: it is keyed by
+  // session, so it mounts with the activity already there.
+  const [animateEnter, setAnimateEnter] = useState(false);
+  if (activity && activity !== lastActivity) {
+    if (!lastActivity) setAnimateEnter(true);
+    setLastActivity(activity);
+  }
 
   useEffect(() => {
-    if (activity) {
-      setRenderedActivity(activity);
-      setIsExiting(false);
-      return;
-    }
-
-    if (!renderedActivity) return;
-
-    setIsExiting(true);
-    const timer = setTimeout(() => {
-      setRenderedActivity(null);
-      setIsExiting(false);
-    }, EXIT_ANIMATION_MS);
-
+    if (activity || !lastActivity) return;
+    const timer = setTimeout(() => setLastActivity(null), EXIT_ANIMATION_MS);
     return () => clearTimeout(timer);
-  }, [activity, renderedActivity]);
+  }, [activity, lastActivity]);
 
+  const renderedActivity = activity ?? lastActivity;
+  const isExiting = !activity && Boolean(lastActivity);
+  const startedAt = renderedActivity?.startedAt ?? null;
+
+  // The clock the elapsed time is read against, ticking once a second. It
+  // starts at the time of mounting, so the first frame already shows how long
+  // the session has been working.
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (startedAt === null) return;
-    const update = () => setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
-    update();
-    const timer = setInterval(update, 1000);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [startedAt]);
 
   if (!renderedActivity) return null;
+
+  const elapsedSeconds = startedAt === null ? 0 : Math.max(0, Math.floor((now - startedAt) / 1000));
 
   const isBackground = Boolean(renderedActivity.background);
   const actionWords = ACTION_KEYS.map((key, i) => t(key, { defaultValue: DEFAULT_ACTION_WORDS[i] }));
@@ -103,7 +105,7 @@ export default function ActivityIndicator({ activity, onAbort, isInputFocused = 
   return (
     <div
       className={`pointer-events-none bg-transparent ${
-        isExiting ? 'chat-activity-exit' : 'chat-activity-enter'
+        isExiting ? 'chat-activity-exit' : animateEnter ? 'chat-activity-enter' : ''
       }`}
     >
       <div className="flex items-end justify-between gap-2">

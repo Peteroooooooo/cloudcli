@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { MutableRefObject } from 'react';
 
 import { api } from '@/shared/api';
+import { SESSION_OPEN_PAGE_SIZE } from '@/shared/constants';
+import { takePrefetchedSessionResponse } from '@/shared/sessionOpenPrefetch';
 import type { MarkSessionIdle, SessionActivityMap,Project,ProjectSession,LLMProvider,NormalizedMessage,ChatMessage,DiffCalculator } from '@/shared/types';
 import type { SessionStore } from '@/modules/chat/hooks/useSessionStore';
 import type { LiveSeqCursor } from '@/modules/chat/hooks/useChatRealtimeHandlers';
@@ -13,7 +15,15 @@ import { findSearchTargetIndex, resolveSearchWindowSize } from '@/modules/chat/u
 import { readSelectedProvider } from '@/shared/selectedProvider';
 import type { SearchTarget } from '@/modules/chat/utils/searchTargetLocator';
 
-const INITIAL_VISIBLE_MESSAGES = 100;
+/**
+ * Messages in the render window when a session opens. Counted in messages,
+ * but shown as rows with a turn's tool calls folded into one card, so a
+ * tool-heavy session needs several hundred to fill the screen; with 100 the
+ * window often fell short of one screen and the transcript was redrawn as
+ * more was mounted. Rows away from the viewport stay placeholders, so the
+ * larger window costs little.
+ */
+const INITIAL_VISIBLE_MESSAGES = 400;
 /**
  * Older history starts loading while the reader is still this many screens
  * below the top, so scrolling up never runs into an edge and waits.
@@ -455,6 +465,9 @@ export function useChatSessionState({
   if (activeSessionForStore !== prevActiveForStoreRef.current) {
     prevActiveForStoreRef.current = activeSessionForStore;
     sessionStore.setActiveSession(activeSessionForStore);
+    // A page the sidebar prefetched on hover lets this very render show the
+    // rows, instead of a loading frame followed by the transcript.
+    if (activeSessionForStore) sessionStore.adoptPrefetchedHistory(activeSessionForStore);
   }
 
   useEffect(() => {
@@ -491,6 +504,42 @@ export function useChatSessionState({
     }
     return all;
   }, [storeMessages, pendingUserMessage]);
+
+  // Token usage last shown for each session, so switching back shows it at
+  // once instead of "0" until the request returns.
+  const tokenUsageBySessionRef = useRef(new Map<string, Record<string, unknown> | null>());
+  // The session whose usage came from the sidebar's prefetch, which makes
+  // the request on opening it unnecessary.
+  const prefetchedTokenUsageSessionRef = useRef<string | null>(null);
+
+  // Sized for the newly selected session during the render that selects it.
+  // A layout effect committed the previous session's window first, which
+  // drew the transcript twice before the first paint.
+  const windowSessionKey = `${selectedProject?.projectId ?? ''}:${selectedSession?.id ?? ''}`;
+  // Which session the render window and token count were last sized for.
+  const [sizedForSessionKey, setSizedForSessionKey] = useState(windowSessionKey);
+  if (sizedForSessionKey !== windowSessionKey) {
+    setSizedForSessionKey(windowSessionKey);
+    const sessionId = selectedSession?.id;
+    const memory = sessionId ? viewMemoryRef.current.get(sessionId) : undefined;
+    setVisibleMessageCount(restoredVisibleCount(memory, chatMessages.length));
+
+    if (sessionId) {
+      const prefetched = takePrefetchedSessionResponse(sessionId, 'tokenUsage', { settledOnly: true });
+      if (prefetched?.body) {
+        tokenUsageBySessionRef.current.set(
+          sessionId,
+          (prefetched.body as { data?: Record<string, unknown> }).data ?? null,
+        );
+        prefetchedTokenUsageSessionRef.current = sessionId;
+      }
+      const slotUsage = sessionStore.getSessionSlot(sessionId)?.tokenUsage;
+      setTokenBudget(
+        tokenUsageBySessionRef.current.get(sessionId)
+          ?? (slotUsage === undefined ? null : (slotUsage as Record<string, unknown> | null)),
+      );
+    }
+  }
 
   const messageCountRef = useRef(chatMessages.length);
   messageCountRef.current = chatMessages.length;
@@ -709,9 +758,9 @@ export function useChatSessionState({
 
     pendingInitialScrollRef.current = true;
     // A session read part-way up comes back with the rows the reader was on
-    // still inside the render window; one left at the end opens on the newest.
+    // still inside the render window (sized during render, above); one left
+    // at the end opens on the newest.
     const memory = selectedSession?.id ? viewMemoryRef.current.get(selectedSession.id) : undefined;
-    setVisibleMessageCount(restoredVisibleCount(memory, messageCountRef.current));
     pendingScrollRestoreRef.current = null;
     const scrolledUp = Boolean(memory && !memory.atBottom);
     isUserScrolledUpRef.current = scrolledUp;
@@ -861,10 +910,6 @@ export function useChatSessionState({
       resetStreamingState();
     }
 
-    if (sessionChanged) {
-      setTokenBudget(null);
-    }
-
     setCurrentSessionId(selectedSessionId);
 
     lastLoadedSessionKeyRef.current = sessionKey;
@@ -903,13 +948,15 @@ export function useChatSessionState({
     // Fetch from server → store updates → chatMessages re-derives automatically
     setIsLoadingSessionMessages(true);
     sessionStore.fetchFromServer(selectedSessionId, {
-      limit: SESSION_MESSAGES_PAGE_SIZE,
+      limit: SESSION_OPEN_PAGE_SIZE,
       offset: 0,
       canRequest: () => (
         isActiveRef.current
         && activeSessionIdRef.current === selectedSessionId
       ),
     }).then(slot => {
+      // The reader may have opened another session meanwhile; its own load owns these.
+      if (activeSessionIdRef.current !== selectedSessionId) return;
       if (slot) {
         setHasMoreMessages(slot.hasMore);
         setTotalMessages(slot.total);
@@ -920,7 +967,7 @@ export function useChatSessionState({
       }
       setIsLoadingSessionMessages(false);
     }).catch(() => {
-      setIsLoadingSessionMessages(false);
+      if (activeSessionIdRef.current === selectedSessionId) setIsLoadingSessionMessages(false);
     });
   }, [
     isActive,
@@ -1101,31 +1148,57 @@ export function useChatSessionState({
 
   // Initial token usage fetch for providers with file-backed usage data.
   useEffect(() => {
-    if (!selectedSession?.id) {
+    const sessionId = selectedSession?.id;
+    if (!sessionId) {
       setTokenBudget(null);
       return;
     }
+    if (prefetchedTokenUsageSessionRef.current === sessionId) {
+      prefetchedTokenUsageSessionRef.current = null;
+      return;
+    }
+    let cancelled = false;
     const fetchInitialTokenUsage = async () => {
       try {
-        // The provider module resolves storage and provider details from the session id.
-        const response = await api.providers.sessionTokenUsage(selectedSession.id);
-        if (response.ok) {
-          const payload = await response.json();
-          setTokenBudget(payload.data ?? null);
+        const prefetched = takePrefetchedSessionResponse(sessionId, 'tokenUsage');
+        let usage: Record<string, unknown> | null = null;
+        if (prefetched) {
+          const body = (await prefetched.promise) as { data?: Record<string, unknown> } | null;
+          usage = body?.data ?? null;
         } else {
-          setTokenBudget(null);
+          // The provider module resolves storage and provider details from the session id.
+          const response = await api.providers.sessionTokenUsage(sessionId);
+          usage = response.ok ? ((await response.json()).data ?? null) : null;
         }
+        // A reply for a session the reader has already left belongs to that session only.
+        if (!cancelled) setTokenBudget(usage);
       } catch (error) {
         console.error('Failed to fetch initial token usage:', error);
       }
     };
     fetchInitialTokenUsage();
+    return () => {
+      cancelled = true;
+    };
   }, [selectedSession?.id]);
+
+  // Kept per session for the next time it is opened.
+  useEffect(() => {
+    const sessionId = selectedSession?.id;
+    if (sessionId) tokenUsageBySessionRef.current.set(sessionId, tokenBudget);
+  // Recorded when the usage changes; the session id is read, not tracked.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tokenBudget]);
 
   const visibleMessages = useMemo(() => {
     if (chatMessages.length <= visibleMessageCount) return chatMessages;
     return chatMessages.slice(-visibleMessageCount);
   }, [chatMessages, visibleMessageCount]);
+
+  // Rows exist above what is mounted, in memory or on the server. A transcript
+  // that does not fill the pane yet is then drawn against the composer, so the
+  // rows that arrive above it do not push what is on screen downwards.
+  const hasOlderHistory = hasMoreMessages || chatMessages.length > visibleMessages.length;
 
   useEffect(() => {
     if (!isActive) return;
@@ -1303,6 +1376,7 @@ export function useChatSessionState({
     setTokenBudget,
     visibleMessageCount,
     visibleMessages,
+    hasOlderHistory,
     revealMessage,
     loadAllMessages,
     loadFullTranscript,

@@ -36,6 +36,7 @@ const store = {
   appendRealtime: vi.fn(),
   refreshLatestFromServer: vi.fn(),
   setActiveSession: vi.fn(),
+  adoptPrefetchedHistory: vi.fn(() => false),
   isStale: vi.fn(() => false),
   updateStreaming: vi.fn(),
   finalizeStreaming: vi.fn(),

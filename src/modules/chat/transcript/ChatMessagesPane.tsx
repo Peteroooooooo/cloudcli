@@ -55,6 +55,12 @@ type ChatMessagesPaneProps = {
   setInput: Dispatch<SetStateAction<string>>;
   isLoadingMoreMessages: boolean;
   visibleMessages: ChatMessage[];
+  /**
+   * Older rows exist above the mounted ones. A transcript shorter than the
+   * pane is then drawn at the bottom, against the composer, so the rows that
+   * load in above it leave what is on screen where it is.
+   */
+  anchorToEnd?: boolean;
   revealMessage: (message: ChatMessage) => void;
   /** The session's running background tasks from the activity map, for the strip to list ones whose rows are not loaded. */
   backgroundTasks?: BackgroundTaskSummary[];
@@ -115,6 +121,7 @@ function ChatMessagesPane({
   setInput,
   isLoadingMoreMessages,
   visibleMessages,
+  anchorToEnd = false,
   revealMessage,
   backgroundTasks,
   sendMessage,
@@ -199,7 +206,7 @@ function ChatMessagesPane({
       onTouchMove={onTouchMove}
       className={`chat-messages-pane relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden pt-3 sm:pt-4 ${
         hasActivityIndicator ? 'pb-12 sm:pb-14' : 'pb-3 sm:pb-4'
-      }`}
+      } ${anchorToEnd ? 'flex flex-col' : ''}`}
     >
       {chatMessages.length > 0 && (
         <div className="pointer-events-none sticky right-4 top-3 z-10 mb-2 flex items-start justify-between gap-2 sm:px-4">
@@ -221,7 +228,7 @@ function ChatMessagesPane({
       {chatMessages.length > 0 && (
         <div className="-mt-1 mb-2 flex justify-end px-4 sm:hidden">{exportMenu}</div>
       )}
-      <div className="mx-auto w-full max-w-[54.25rem] space-y-3 px-4 sm:space-y-4">
+      <div className={`mx-auto w-full max-w-[54.25rem] space-y-3 px-4 sm:space-y-4 ${anchorToEnd ? 'mt-auto' : ''}`}>
       {(isLoadingSessionMessages || isProcessing) && chatMessages.length === 0 ? (
         <div className="mt-8 text-center text-gray-500 dark:text-gray-400">
           <div className="flex items-center justify-center space-x-2">

@@ -7,9 +7,11 @@
  * No localStorage for messages. Backend JSONL is the source of truth.
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { api } from '@/shared/api';
+import { SESSION_OPEN_PAGE_SIZE } from '@/shared/constants';
+import { registerHeldHistoryCheck, takePrefetchedSessionResponse } from '@/shared/sessionOpenPrefetch';
 import type { LLMProvider, NormalizedMessage } from '@/shared/types';
 import { removeOptimisticUserEchoes } from '@/modules/chat/utils/sessionMessageReconciliation';
 import {
@@ -103,20 +105,48 @@ async function requestSessionHistoryPage(
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-  const body = await response.json();
-  const data = body?.data ?? body;
+  return readSessionHistoryPage(await response.json());
+}
+
+function readSessionHistoryPage(body: unknown): SessionHistoryPage {
+  const envelope = body as { data?: unknown } | null;
+  const data = (envelope?.data ?? envelope ?? {}) as Record<string, unknown>;
   const messages: NormalizedMessage[] = Array.isArray(data.messages) ? data.messages : [];
 
   return {
     messages,
     total: typeof data.total === 'number' ? data.total : messages.length,
     hasMore: Boolean(data.hasMore),
-    ...(
-      data && typeof data === 'object' && 'tokenUsage' in data
-        ? { tokenUsage: data.tokenUsage }
-        : {}
-    ),
+    ...('tokenUsage' in data ? { tokenUsage: data.tokenUsage } : {}),
   };
+}
+
+/** The opening page the sidebar already asked for, when this request is for exactly that page. */
+async function readPrefetchedOpeningPage(
+  sessionId: string,
+  options: SessionMessagesRequestOptions,
+): Promise<SessionHistoryPage | null> {
+  if (options.limit !== SESSION_OPEN_PAGE_SIZE || (options.offset ?? 0) !== 0) return null;
+  const prefetched = takePrefetchedSessionResponse(sessionId, 'history');
+  const body = prefetched ? await prefetched.promise : null;
+  return body ? readSessionHistoryPage(body) : null;
+}
+
+function applyOpeningPage(slot: SessionSlot, page: SessionHistoryPage, offset: number) {
+  slot.serverMessages = page.messages;
+  slot.total = page.total;
+  slot.hasMore = page.hasMore;
+  slot.offset = offset + page.messages.length;
+  slot.fetchedAt = Date.now();
+  slot.status = 'idle';
+  slot.realtimeMessages = pruneRealtimeSupersededByServer(
+    slot.serverMessages,
+    slot.realtimeMessages,
+  );
+  recomputeMergedIfNeeded(slot);
+  if (page.tokenUsage !== undefined) {
+    slot.tokenUsage = page.tokenUsage;
+  }
 }
 
 /**
@@ -626,6 +656,13 @@ export function useSessionStore() {
     activeSessionIdRef.current = sessionId;
   }, []);
 
+  // A session already in memory opens from it, so hovering its row must not
+  // download its opening page again.
+  useEffect(() => registerHeldHistoryCheck((sessionId) => {
+    const slot = storeRef.current.get(sessionId);
+    return Boolean(slot && (slot.fetchedAt || slot.status === 'loading'));
+  }), []);
+
   const getSlot = useCallback((sessionId: string): SessionSlot => {
     const store = storeRef.current;
     if (!store.has(sessionId)) {
@@ -661,21 +698,9 @@ export function useSessionStore() {
       }
 
       try {
-        const data = await requestSessionHistoryPage(sessionId, requestOptions);
-        slot.serverMessages = data.messages;
-        slot.total = data.total;
-        slot.hasMore = data.hasMore;
-        slot.offset = (requestOptions.offset ?? 0) + data.messages.length;
-        slot.fetchedAt = Date.now();
-        slot.status = 'idle';
-        slot.realtimeMessages = pruneRealtimeSupersededByServer(
-          slot.serverMessages,
-          slot.realtimeMessages,
-        );
-        recomputeMergedIfNeeded(slot);
-        if (data.tokenUsage !== undefined) {
-          slot.tokenUsage = data.tokenUsage;
-        }
+        const data = await readPrefetchedOpeningPage(sessionId, requestOptions)
+          ?? await requestSessionHistoryPage(sessionId, requestOptions);
+        applyOpeningPage(slot, data, requestOptions.offset ?? 0);
 
         notify(sessionId);
         return slot;
@@ -938,6 +963,22 @@ export function useSessionStore() {
     return storeRef.current.get(sessionId);
   }, []);
 
+  /**
+   * Fills a session that has no history yet from the opening page the sidebar
+   * prefetched, when that answer is already here. Synchronous and without a
+   * re-render, so the render that opens the session can already show its
+   * rows instead of a loading frame. A page still in flight is left for
+   * fetchFromServer to wait for.
+   */
+  const adoptPrefetchedHistory = useCallback((sessionId: string): boolean => {
+    const existing = storeRef.current.get(sessionId);
+    if (existing && (existing.fetchedAt || existing.status === 'loading')) return false;
+    const prefetched = takePrefetchedSessionResponse(sessionId, 'history', { settledOnly: true });
+    if (!prefetched?.body) return false;
+    applyOpeningPage(getSlot(sessionId), readSessionHistoryPage(prefetched.body), 0);
+    return true;
+  }, [getSlot]);
+
   return useMemo(() => ({
     fetchFromServer,
     fetchMore,
@@ -950,10 +991,11 @@ export function useSessionStore() {
     finalizeStreaming,
     getMessages,
     getSessionSlot,
+    adoptPrefetchedHistory,
   }), [
     fetchFromServer, fetchMore, appendRealtime, truncateAt, refreshLatestFromServer,
     setActiveSession, isStale, updateStreaming, finalizeStreaming,
-    getMessages, getSessionSlot,
+    getMessages, getSessionSlot, adoptPrefetchedHistory,
   ]);
 }
 

@@ -145,6 +145,7 @@ function ChatInterface({
     tokenBudget,
     setTokenBudget,
     visibleMessages,
+    hasOlderHistory,
     revealMessage,
     loadAllMessages,
     loadFullTranscript,
@@ -473,6 +474,7 @@ function ChatInterface({
               setInput={setInput}
               isLoadingMoreMessages={isLoadingMoreMessages}
               visibleMessages={visibleMessages}
+              anchorToEnd={hasOlderHistory}
               revealMessage={revealMessage}
               backgroundTasks={sessionActivity?.tasks}
               sendMessage={sendMessage}
@@ -514,6 +516,7 @@ function ChatInterface({
           handlePermissionDecision={handlePermissionDecision}
           handleGrantToolPermission={handleGrantToolPermission}
           activity={sessionActivity}
+          activitySessionId={selectedSession?.id ?? currentSessionId}
           isLoading={isProcessing}
           onAbortSession={handleAbortSession}
           permissionMode={permissionMode}

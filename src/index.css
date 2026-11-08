@@ -604,6 +604,14 @@
     contain-intrinsic-size: auto 96px;
   }
 
+  /* The newest rows are the ones on screen when a session opens. With the
+     estimated sizes above they were laid out at 96-240px for the first frame
+     and then at their real height, which moved the bottom of the transcript
+     and showed a scrollbar for that one frame. */
+  .chat-messages-pane [data-message-timestamp]:nth-last-child(-n + 20) .chat-message {
+    content-visibility: visible;
+  }
+
   /* Mobile touch optimization and safe areas */
   @media (max-width: 768px) {
     * {

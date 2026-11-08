@@ -10,6 +10,7 @@ import type { PendingPermissionRequest, PermissionMode,
   ProviderModelOption,
   ProviderModelsDefinition } from '@/shared/types';
 import { DEFAULT_EFFORT_VALUE } from '@/shared/constants';
+import { takePrefetchedSessionResponse } from '@/shared/sessionOpenPrefetch';
 import { readSelectedProvider, writeSelectedProvider } from '@/shared/selectedProvider';
 
 const FALLBACK_PROVIDER_EFFORT_VALUES: Partial<Record<LLMProvider, readonly string[]>> = {
@@ -126,6 +127,28 @@ type SessionProviderSelection = {
 const getSessionSelectionKey = (provider: LLMProvider, sessionId: string): string => (
   `${provider}:${sessionId}`
 );
+
+/**
+ * The model and effort last read or chosen for each session. Opening a
+ * session again shows them at once; until its request returned the composer
+ * showed the per-provider default, then switched to the session's model.
+ */
+const sessionSelectionCache = new Map<string, SessionProviderSelection>();
+
+const readSessionSelection = (
+  provider: LLMProvider,
+  sessionId: string,
+  body: SessionSelectionApiResponse | null,
+): SessionProviderSelection => {
+  const resolvedModel = body?.data?.model?.trim();
+  const resolvedEffort = body?.data?.effort?.trim() || null;
+  return {
+    provider,
+    sessionId,
+    model: body?.success && resolvedModel && body.data?.source !== 'default' ? resolvedModel : null,
+    effort: body?.success ? resolvedEffort : null,
+  };
+};
 
 export function useChatProviderState({ selectedSession, selectedProject: _selectedProject }: UseChatProviderStateArgs) {
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
@@ -483,13 +506,35 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   const selectedSessionKeyRef = useRef<string | null>(selectedSessionKey);
   selectedSessionKeyRef.current = selectedSessionKey;
 
+  // A selection the sidebar prefetched while the pointer was on the session's
+  // row is taken into the cache here, so the render that opens the session
+  // already shows its model.
+  if (selectedSessionId && selectedSessionKey && !sessionSelectionCache.has(selectedSessionKey)) {
+    const prefetched = takePrefetchedSessionResponse(selectedSessionId, 'selection', {
+      settledOnly: true,
+      provider: selectedSessionProvider,
+    });
+    if (prefetched?.body) {
+      sessionSelectionCache.set(
+        selectedSessionKey,
+        readSessionSelection(selectedSessionProvider, selectedSessionId, prefetched.body as SessionSelectionApiResponse),
+      );
+    }
+  }
+
   const activeSessionSelection = sessionSelection
     && selectedSessionId
     && sessionSelection.sessionId === selectedSessionId
     && sessionSelection.provider === selectedSessionProvider
     ? sessionSelection
-    : null;
+    : (selectedSessionKey ? sessionSelectionCache.get(selectedSessionKey) ?? null : null);
   const sessionModel = activeSessionSelection?.model ?? null;
+
+  useEffect(() => {
+    if (sessionSelection) {
+      sessionSelectionCache.set(getSessionSelectionKey(sessionSelection.provider, sessionSelection.sessionId), sessionSelection);
+    }
+  }, [sessionSelection]);
 
   useEffect(() => {
     const requestId = sessionSelectionLoadRequestIdRef.current + 1;
@@ -506,8 +551,10 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
 
     const loadSessionSelection = async () => {
       try {
-        const response = await api.providers.sessionActiveModel(targetProvider, selectedSessionId);
-        const body = (await response.json()) as SessionSelectionApiResponse;
+        const prefetched = takePrefetchedSessionResponse(selectedSessionId, 'selection', { provider: targetProvider });
+        const prefetchedBody = prefetched ? (await prefetched.promise) as SessionSelectionApiResponse | null : null;
+        const body = prefetchedBody
+          ?? (await (await api.providers.sessionActiveModel(targetProvider, selectedSessionId)).json()) as SessionSelectionApiResponse;
         if (
           cancelled
           || sessionSelectionLoadRequestIdRef.current !== requestId
@@ -516,14 +563,7 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
           return;
         }
 
-        const resolvedModel = body.data?.model?.trim();
-        const resolvedEffort = body.data?.effort?.trim() || null;
-        setSessionSelection({
-          provider: targetProvider,
-          sessionId: selectedSessionId,
-          model: body.success && resolvedModel && body.data?.source !== 'default' ? resolvedModel : null,
-          effort: body.success ? resolvedEffort : null,
-        });
+        setSessionSelection(readSessionSelection(targetProvider, selectedSessionId, body));
       } catch (error) {
         if (
           !cancelled

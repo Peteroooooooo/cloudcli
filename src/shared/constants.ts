@@ -78,6 +78,19 @@ export const DEFAULT_EFFORT_VALUE = 'default';
 
 // ---------------------------
 
+//----------------- CHAT HISTORY PAGING ------------
+
+/**
+ * Messages asked for when a session is opened without any of its history in
+ * memory. Work cards fold a turn's tool calls into one row, so 20 messages of
+ * a tool-heavy session made two rows and every following page moved the
+ * screen; 200 fill several screens in one request. The sidebar's prefetch asks
+ * for the same page, so chat can use that response instead of a second request.
+ */
+export const SESSION_OPEN_PAGE_SIZE = 200;
+
+// ---------------------------
+
 //----------------- FILE UPLOAD LIMITS ------------
 
 /** Largest single file the upload endpoint accepts, in megabytes. Source of truth for the two derived limits below. */

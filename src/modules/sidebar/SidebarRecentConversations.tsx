@@ -8,6 +8,7 @@ import type { ProjectSession, RecentConversationListItem, SessionRowActions } fr
 import { formatCompactAge } from '@/modules/sidebar/utils/sidebarProjectFormatting';
 import SessionOptions from '@/modules/sidebar/SessionOptions';
 import OpenElsewhereMarker from '@/modules/sidebar/OpenElsewhereMarker';
+import { useSessionRowPrefetch } from '@/modules/sidebar/hooks/useSessionRowPrefetch';
 
 type SidebarRecentConversationsProps = {
   conversations: RecentConversationListItem[];
@@ -65,6 +66,8 @@ export default function SidebarRecentConversations({
   onRetry,
   t,
 }: SidebarRecentConversationsProps) {
+  const getPrefetchHandlers = useSessionRowPrefetch();
+
   if (isLoading && conversations.length === 0) {
     return <RecentConversationSkeleton />;
   }
@@ -156,6 +159,7 @@ export default function SidebarRecentConversations({
               <a
                 href={`/session/${conversation.sessionId}`}
                 onClick={handleClick}
+                {...getPrefetchHandlers(conversation.sessionId, conversation.provider, isSelected)}
                 data-testid="recent-conversation-row"
                 className={cn(
                   'flex min-w-0 items-center gap-2 rounded-lg px-2 py-2 pr-11 text-left transition-colors',

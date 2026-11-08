@@ -6,6 +6,7 @@ import path from 'path';
 import os from 'os';
 import http from 'http';
 
+import compression from 'compression';
 import express, { type NextFunction, type Request, type Response } from 'express';
 
 import { AppError, findApplicationRoot, getModuleDirectory, IS_PLATFORM, terminalTextStyles } from '@/shared/utils.js';
@@ -123,6 +124,15 @@ createWebSocketServer(server, {
     },
     getPluginPort,
 });
+
+// Responses reach remote browsers through a relay with no compression of its
+// own, where a session's opening history page is over a megabyte of JSON.
+// Event streams are left alone: compression buffers output, which would hold
+// back each event until enough had piled up.
+const COMPRESSIBLE_CONTENT_TYPE = /^(application\/(json|javascript|manifest\+json)|text\/(html|css|javascript|plain)|image\/svg\+xml)\b/i;
+app.use(compression({
+    filter: (_req, res) => COMPRESSIBLE_CONTENT_TYPE.test(String(res.getHeader('Content-Type') ?? '')),
+}));
 
 app.use(express.json({
     limit: '50mb',

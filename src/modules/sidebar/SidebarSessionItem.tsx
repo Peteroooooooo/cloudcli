@@ -10,6 +10,7 @@ import { useSessionForkingProviders } from '@/shared/hooks/useProviderCapabiliti
 import { PROVIDER_LABELS, createSessionViewModel, formatCompactAge } from '@/modules/sidebar/utils/sidebarProjectFormatting';
 import { useCompactSidebar } from '@/modules/sidebar/hooks/useCompactSidebar';
 import { useProviderSessionIdCopy } from '@/modules/sidebar/hooks/useProviderSessionIdCopy';
+import { useSessionRowPrefetch } from '@/modules/sidebar/hooks/useSessionRowPrefetch';
 import SessionOptions from '@/modules/sidebar/SessionOptions';
 import OpenElsewhereMarker from '@/modules/sidebar/OpenElsewhereMarker';
 
@@ -113,6 +114,8 @@ function SidebarSessionItem({
   // A running session cannot be deleted, so it cannot be ticked either; the row
   // still renders, locked, instead of disappearing from the list mid-selection.
   const isSelectable = isSelecting && !isProcessing;
+  const getPrefetchHandlers = useSessionRowPrefetch();
+  const prefetchHandlers = getPrefetchHandlers(session.id, session.__provider, isSelected || isSelecting);
   const toggleSelected = () => {
     onToggleSessionSelected(project.projectId, session.id);
   };
@@ -194,6 +197,7 @@ function SidebarSessionItem({
           )}
           onClick={isSelecting ? (isSelectable ? toggleSelected : undefined) : selectMobileSession}
           onKeyDown={isSelecting ? handleSelectionKeyDown : undefined}
+          {...prefetchHandlers}
         >
           <div className="flex items-center gap-2">
             {selectionIcon}
@@ -423,6 +427,7 @@ function SidebarSessionItem({
                 : 'hover:bg-accent/50',
             isChecked && 'border-primary/40 bg-primary/10',
           )}
+          {...prefetchHandlers}
           // Left-click keeps in-app navigation; Ctrl/Cmd/middle-click and the
           // native right-click menu use the href to open a new tab/window.
           // While selecting, every click ticks the row instead.
