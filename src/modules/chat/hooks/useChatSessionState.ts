@@ -905,6 +905,14 @@ export function useChatSessionState({
       return;
     }
 
+    // The effect re-runs whenever the project list hands back a new
+    // selectedProject object. The opening load already started for this
+    // session settles the state itself; a second one would queue behind it
+    // and download the same page again.
+    if (lastLoadedSessionKeyRef.current === sessionKey && existingSlot?.status === 'loading') {
+      return;
+    }
+
     const sessionChanged = currentSessionId !== null && currentSessionId !== selectedSessionId;
     if (sessionChanged) {
       resetStreamingState();

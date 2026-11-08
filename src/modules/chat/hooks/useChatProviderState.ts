@@ -10,6 +10,7 @@ import type { PendingPermissionRequest, PermissionMode,
   ProviderModelOption,
   ProviderModelsDefinition } from '@/shared/types';
 import { DEFAULT_EFFORT_VALUE } from '@/shared/constants';
+import { loadProviderCapabilities } from '@/shared/hooks/useProviderCapabilities';
 import { takePrefetchedSessionResponse } from '@/shared/sessionOpenPrefetch';
 import { readSelectedProvider, writeSelectedProvider } from '@/shared/selectedProvider';
 
@@ -69,13 +70,6 @@ type ProviderCapabilities = {
   supportsEffort?: boolean;
   supportsMessageEditing?: boolean;
   supportsSessionForking?: boolean;
-};
-
-type ProviderCapabilitiesApiResponse = {
-  success?: boolean;
-  data?: {
-    providers?: ProviderCapabilities[];
-  };
 };
 
 type UseChatProviderStateArgs = {
@@ -251,25 +245,14 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   useEffect(() => {
     let cancelled = false;
 
-    const loadCapabilities = async () => {
-      try {
-        const response = await api.providers.capabilities();
-        const body = (await response.json()) as ProviderCapabilitiesApiResponse;
-        if (cancelled || !body.success || !Array.isArray(body.data?.providers)) {
-          return;
-        }
-
-        const byProvider: Partial<Record<LLMProvider, ProviderCapabilities>> = {};
-        for (const capabilities of body.data.providers) {
-          byProvider[capabilities.provider] = capabilities;
-        }
-        setProviderCapabilities(byProvider);
-      } catch (error) {
-        console.error('Error loading provider capabilities:', error);
+    // Shared with the sidebar rows, which ask for the same matrix on the
+    // same first render.
+    void loadProviderCapabilities().then((byProvider) => {
+      if (cancelled || Object.keys(byProvider).length === 0) {
+        return;
       }
-    };
-
-    void loadCapabilities();
+      setProviderCapabilities(byProvider as Partial<Record<LLMProvider, ProviderCapabilities>>);
+    });
     return () => {
       cancelled = true;
     };

@@ -714,16 +714,28 @@ export function useProjectsState({
         return;
       }
 
-      setProjects((previousProjects) =>
-        previousProjects.map((project) =>
-          project.projectId === projectId
-            ? { ...project, taskmaster: taskMasterInfo }
-            : project,
-        ),
-      );
+      // Unchanged details keep the project objects as they are: a new
+      // selectedProject re-runs every effect that depends on it, among them
+      // the chat's history load and the slash-command fetch.
+      const serializedInfo = serialize(taskMasterInfo);
+      setProjects((previousProjects) => (
+        previousProjects.some((project) => (
+          project.projectId === projectId && serialize(project.taskmaster) !== serializedInfo
+        ))
+          ? previousProjects.map((project) =>
+            project.projectId === projectId
+              ? { ...project, taskmaster: taskMasterInfo }
+              : project,
+          )
+          : previousProjects
+      ));
 
       setSelectedProject((previousProject) => {
-        if (!previousProject || previousProject.projectId !== projectId) {
+        if (
+          !previousProject
+          || previousProject.projectId !== projectId
+          || serialize(previousProject.taskmaster) === serializedInfo
+        ) {
           return previousProject;
         }
 

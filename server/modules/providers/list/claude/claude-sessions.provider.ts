@@ -64,6 +64,38 @@ const formatDuration = (milliseconds: number): string => {
  */
 const MAX_TRANSMITTED_SUBAGENT_ACTIVITIES = 200;
 
+/**
+ * Transcript rows come from `transcriptRowsCache` and are the same objects on
+ * every read, so a structured tool result (an image Read, an MCP reply) is
+ * serialized once instead of twice per history request. On a 20k-row session
+ * those two passes were a third of each read's CPU, and a running session is
+ * read again after every step it writes.
+ */
+const serializedToolContent = new WeakMap<object, string>();
+
+function serializeToolResultContent(content: unknown): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (content === null || typeof content !== 'object') {
+    return JSON.stringify(content);
+  }
+  let serialized = serializedToolContent.get(content);
+  if (serialized === undefined) {
+    serialized = JSON.stringify(content);
+    serializedToolContent.set(content, serialized);
+  }
+  return serialized;
+}
+
+/** Orders rows by timestamp, parsing each one once; rows with equal times keep their file order. */
+function sortRowsByTimestamp(rows: AnyRecord[]): AnyRecord[] {
+  return rows
+    .map((row) => ({ row, time: new Date(row.timestamp || 0).getTime() }))
+    .sort((a, b) => a.time - b.time)
+    .map(({ row }) => row);
+}
+
 type ClaudeToolResult = {
   content: unknown;
   isError: boolean;
@@ -917,10 +949,8 @@ async function getSessionMessages(
       }
     }
 
-    const sortedMessages = messages
-      .filter((message) => !foldedNotificationUuids.has(String(message.uuid ?? '')))
-      .sort(
-      (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime(),
+    const sortedMessages = sortRowsByTimestamp(
+      messages.filter((message) => !foldedNotificationUuids.has(String(message.uuid ?? ''))),
     );
     const total = sortedMessages.length;
 
@@ -1391,7 +1421,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
               provider: PROVIDER,
               kind: 'tool_result',
               toolId: part.tool_use_id,
-              content: typeof part.content === 'string' ? part.content : JSON.stringify(part.content),
+              content: serializeToolResultContent(part.content),
               isError: Boolean(part.is_error),
               // `toolUseResult` on disk, `tool_use_result` on the live SDK
               // stream. Reading only the transcript key meant a live agent
@@ -1827,9 +1857,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
         }
 
         msg.toolResult = {
-          content: typeof toolResult.content === 'string'
-            ? toolResult.content
-            : JSON.stringify(toolResult.content),
+          content: serializeToolResultContent(toolResult.content),
           isError: toolResult.isError,
           toolUseResult: toolResult.toolUseResult,
         };

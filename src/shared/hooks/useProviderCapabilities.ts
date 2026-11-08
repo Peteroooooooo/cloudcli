@@ -7,22 +7,30 @@ import type { LLMProvider } from '@/shared/types';
  * The backend-owned answer to "what can this provider actually do".
  *
  * Only the fields consumers outside chat need are declared; the matrix itself
- * is larger and lives in `provider-capabilities.service.ts`.
+ * is larger and lives in `provider-capabilities.service.ts`. The rows are kept
+ * whole, so the chat composer reads its own fields from the same response.
  */
 type ProviderCapabilityRow = {
   provider: LLMProvider;
   supportsSessionForking?: boolean;
 };
 
+type CapabilitiesByProvider = Partial<Record<LLMProvider, ProviderCapabilityRow>>;
+
 /**
  * Cached at module scope because the matrix is static for the life of the
- * server process and more than one part of the UI asks for it. Without this,
- * opening the sidebar would refetch it on every mount.
+ * server process and more than one part of the UI asks for it: the sidebar
+ * rows and the chat composer both need it on the first render of a session.
  */
-let cachedCapabilities: Partial<Record<LLMProvider, ProviderCapabilityRow>> | null = null;
-let inFlightRequest: Promise<Partial<Record<LLMProvider, ProviderCapabilityRow>>> | null = null;
+let cachedCapabilities: CapabilitiesByProvider | null = null;
+let inFlightRequest: Promise<CapabilitiesByProvider> | null = null;
 
-async function loadCapabilities(): Promise<Partial<Record<LLMProvider, ProviderCapabilityRow>>> {
+/**
+ * Resolves the capability matrix keyed by provider, from one request shared
+ * by every caller. Resolves to an empty record if the request failed, and asks
+ * again on the next call.
+ */
+export async function loadProviderCapabilities(): Promise<CapabilitiesByProvider> {
   if (cachedCapabilities) {
     return cachedCapabilities;
   }
@@ -35,7 +43,7 @@ async function loadCapabilities(): Promise<Partial<Record<LLMProvider, ProviderC
       const response = await api.providers.capabilities();
       const body = (await response.json()) as { success?: boolean; data?: { providers?: ProviderCapabilityRow[] } };
       const rows = body.success && Array.isArray(body.data?.providers) ? body.data.providers : [];
-      const byProvider: Partial<Record<LLMProvider, ProviderCapabilityRow>> = {};
+      const byProvider: CapabilitiesByProvider = {};
       for (const row of rows) {
         byProvider[row.provider] = row;
       }
@@ -66,7 +74,7 @@ export function useSessionForkingProviders(): Set<LLMProvider> {
   useEffect(() => {
     let cancelled = false;
 
-    void loadCapabilities().then((capabilities) => {
+    void loadProviderCapabilities().then((capabilities) => {
       if (cancelled) return;
       const forkable = new Set<LLMProvider>();
       for (const row of Object.values(capabilities)) {

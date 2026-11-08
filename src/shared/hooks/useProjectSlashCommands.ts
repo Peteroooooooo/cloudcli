@@ -87,6 +87,10 @@ export function useProjectSlashCommands(
   // Set when the request failed so a list can explain the emptiness; cleared
   // on the next successful fetch.
   const [error, setError] = useState(false);
+  // The list depends only on where the project lives. Keyed on the path, a
+  // project object that is replaced with unchanged fields (TaskMaster
+  // hydration, a list refresh) does not fetch the list again.
+  const workspacePath = selectedProject ? (selectedProject.fullPath || selectedProject.path || '') : null;
 
   useEffect(() => {
     if (!enabled) {
@@ -96,7 +100,7 @@ export function useProjectSlashCommands(
     let cancelled = false;
 
     const fetchCommands = async () => {
-      if (!selectedProject) {
+      if (workspacePath === null) {
         setCommands([]);
         setIsLoading(false);
         setError(false);
@@ -107,15 +111,16 @@ export function useProjectSlashCommands(
       setError(false);
 
       try {
-        const workspacePath = selectedProject.fullPath || selectedProject.path || '';
-        const response = await api.commands.list(workspacePath || selectedProject.path);
+        const [response, skillsResponse] = await Promise.all([
+          api.commands.list(workspacePath),
+          api.providers.skills(provider, { workspacePath }),
+        ]);
 
         if (!response.ok) {
           throw new Error('Failed to fetch commands');
         }
 
         const data = await response.json();
-        const skillsResponse = await api.providers.skills(provider, { workspacePath });
         const skillsData = skillsResponse.ok
           ? ((await skillsResponse.json()) as ProviderSkillsResponse)
           : null;
@@ -151,7 +156,7 @@ export function useProjectSlashCommands(
     return () => {
       cancelled = true;
     };
-  }, [enabled, selectedProject, provider]);
+  }, [enabled, workspacePath, provider]);
 
   return { commands, isLoading, error };
 }

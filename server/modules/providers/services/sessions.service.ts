@@ -18,6 +18,60 @@ import type {
 } from '@/shared/types.js';
 import { AppError, sliceTailPage } from '@/shared/utils.js';
 
+const FILE_EDIT_TOOL_NAMES = new Set(['Edit', 'MultiEdit', 'Write']);
+
+/**
+ * Fields of an edit tool's `toolUseResult` the transcript never reads: the
+ * whole file before the edit and the CLI's own patch. The diff on screen is
+ * drawn from the tool input.
+ */
+const UNREAD_EDIT_RESULT_FIELDS = ['originalFile', 'structuredPatch'] as const;
+
+/**
+ * Drops what a history page carries but the transcript cannot show.
+ *
+ * A successful Read's result is hidden in the transcript (only the file name
+ * is drawn), yet it is the file's text twice over, or an image's base64 twice
+ * over: once as the result and again in `toolUseResult.file`. On a measured
+ * 200-row page that was 1.7 MB of 2.6 MB. Failed Reads keep their message,
+ * which is shown. Returns the message itself when nothing is dropped, and a
+ * copy otherwise; cached history is shared between requests and is never
+ * written to.
+ */
+function compactForTranscriptView(message: NormalizedMessage): NormalizedMessage {
+  const toolResult = message.toolResult;
+  if (message.kind !== 'tool_use' || !toolResult || toolResult.isError) {
+    return message;
+  }
+
+  if (message.toolName === 'Read') {
+    let toolUseResult = toolResult.toolUseResult;
+    if (toolUseResult && typeof toolUseResult === 'object' && 'file' in toolUseResult) {
+      toolUseResult = { ...toolUseResult as Record<string, unknown> };
+      delete (toolUseResult as Record<string, unknown>).file;
+    }
+    return { ...message, toolResult: { ...toolResult, content: '', toolUseResult } };
+  }
+
+  if (FILE_EDIT_TOOL_NAMES.has(String(message.toolName ?? ''))) {
+    const toolUseResult = toolResult.toolUseResult;
+    if (
+      !toolUseResult
+      || typeof toolUseResult !== 'object'
+      || !UNREAD_EDIT_RESULT_FIELDS.some((field) => field in toolUseResult)
+    ) {
+      return message;
+    }
+    const kept = { ...toolUseResult as Record<string, unknown> };
+    for (const field of UNREAD_EDIT_RESULT_FIELDS) {
+      delete kept[field];
+    }
+    return { ...message, toolResult: { ...toolResult, toolUseResult: kept } };
+  }
+
+  return message;
+}
+
 /**
  * One session the running-sessions poll reports as busy.
  *
@@ -606,10 +660,13 @@ export const sessionsService = {
       });
     }
 
+    // A page feeds the transcript on screen; the whole transcript (`limit:
+    // null`) feeds export and search, which keep every field.
+    const toPageMessage = requestedLimit === null ? (message: NormalizedMessage) => message : compactForTranscriptView;
     return {
       ...result,
       messages: result.messages.map((message) => ({
-        ...message,
+        ...toPageMessage(message),
         sessionId,
       })),
     };

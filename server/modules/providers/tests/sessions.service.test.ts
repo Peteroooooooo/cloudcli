@@ -196,6 +196,110 @@ test('history pages are sliced from the cached full transcript and see appended 
   }
 });
 
+/** An assistant tool call and the user row carrying its result, the way Claude writes them. */
+function claudeToolRows(
+  sessionId: string,
+  ordinal: number,
+  toolName: string,
+  input: Record<string, unknown>,
+  result: { content: unknown; isError?: boolean; toolUseResult: Record<string, unknown> },
+): Record<string, unknown>[] {
+  const toolUseId = `toolu_${ordinal}`;
+  const at = (offset: number) => new Date(Date.UTC(2026, 0, 1, 0, 1, ordinal + offset)).toISOString();
+  return [
+    {
+      type: 'assistant',
+      uuid: `row-${ordinal}`,
+      parentUuid: `row-${ordinal - 1}`,
+      timestamp: at(0),
+      sessionId,
+      message: { role: 'assistant', content: [{ type: 'tool_use', id: toolUseId, name: toolName, input }] },
+    },
+    {
+      type: 'user',
+      uuid: `row-${ordinal + 1}`,
+      parentUuid: `row-${ordinal}`,
+      timestamp: at(1),
+      sessionId,
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: toolUseId, content: result.content, is_error: Boolean(result.isError) }],
+      },
+      toolUseResult: result.toolUseResult,
+    },
+  ];
+}
+
+test('a history page leaves out what the transcript never shows, the full transcript keeps it', { concurrency: false }, async () => {
+  const transcriptDirectory = await mkdtemp(path.join(os.tmpdir(), 'sessions-service-compact-'));
+  const sessionId = 'claude-compact-page-session';
+  const transcriptPath = path.join(transcriptDirectory, `${sessionId}.jsonl`);
+  const fileText = 'export const answer = 42;\n'.repeat(50);
+  const imageBlocks = [{ type: 'image', source: { type: 'base64', data: 'iVBORw0KGgo' } }];
+
+  try {
+    await withIsolatedDatabase(async () => {
+      const rows = [
+        claudeTextRow(sessionId, 'user', 'look at these', 0),
+        ...claudeToolRows(sessionId, 1, 'Read', { file_path: '/repo/a.ts' }, {
+          content: fileText,
+          toolUseResult: { type: 'text', file: { filePath: '/repo/a.ts', content: fileText } },
+        }),
+        ...claudeToolRows(sessionId, 3, 'Read', { file_path: '/repo/shot.png' }, {
+          content: imageBlocks,
+          toolUseResult: { type: 'image', file: { base64: 'iVBORw0KGgo', type: 'image/png' } },
+        }),
+        ...claudeToolRows(sessionId, 5, 'Read', { file_path: '/repo/missing.ts' }, {
+          content: 'File does not exist.',
+          isError: true,
+          toolUseResult: { type: 'text' },
+        }),
+        ...claudeToolRows(sessionId, 7, 'Edit', { file_path: '/repo/a.ts', old_string: '42', new_string: '43' }, {
+          content: 'The file /repo/a.ts has been updated.',
+          toolUseResult: { filePath: '/repo/a.ts', oldString: '42', newString: '43', originalFile: fileText, structuredPatch: [{ oldStart: 1 }] },
+        }),
+      ];
+      await writeFile(transcriptPath, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`, 'utf8');
+      sessionsDb.createSession(
+        sessionId,
+        'claude',
+        '/tmp/compact-page-project',
+        'Compact page conversation',
+        '2026-01-01T00:00:00.000Z',
+        '2026-01-01T00:02:00.000Z',
+        transcriptPath,
+      );
+
+      const toolRows = (messages: { kind?: string; toolInput?: unknown; toolResult?: unknown }[]) =>
+        messages.filter((message) => message.kind === 'tool_use') as {
+          toolInput: { file_path: string };
+          toolResult: { content: string; isError: boolean; toolUseResult: Record<string, unknown> };
+        }[];
+
+      const page = toolRows((await sessionsService.fetchHistory(sessionId, { limit: 20, offset: 0 })).messages);
+      const [readText, readImage, readMissing, edit] = page;
+      assert.equal(readText.toolResult.content, '');
+      assert.deepEqual(readText.toolResult.toolUseResult, { type: 'text' });
+      assert.equal(readText.toolResult.isError, false, 'the call still reads as completed');
+      assert.equal(readImage.toolResult.content, '');
+      assert.deepEqual(readImage.toolResult.toolUseResult, { type: 'image' });
+      assert.equal(readMissing.toolResult.content, 'File does not exist.', 'a failed Read keeps the message it shows');
+      assert.deepEqual(edit.toolResult.toolUseResult, { filePath: '/repo/a.ts', oldString: '42', newString: '43' });
+      assert.equal(edit.toolResult.content, 'The file /repo/a.ts has been updated.');
+
+      // Export and search read the whole transcript; it is left as written,
+      // and serving the page first did not change the cached copy.
+      const full = toolRows((await sessionsService.fetchHistory(sessionId, { limit: null, offset: 0 })).messages);
+      assert.equal(full[0].toolResult.content, fileText);
+      assert.deepEqual(full[0].toolResult.toolUseResult.file, { filePath: '/repo/a.ts', content: fileText });
+      assert.equal(full[1].toolResult.content, JSON.stringify(imageBlocks));
+      assert.equal(full[3].toolResult.toolUseResult.originalFile, fileText);
+    });
+  } finally {
+    await rm(transcriptDirectory, { recursive: true, force: true });
+  }
+});
+
 /**
  * Stands in for the provider registry with one provider per id, each with the
  * runtime given — the seam through which a runtime's background work reaches
