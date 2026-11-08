@@ -331,7 +331,6 @@
     "working": "正在處理",
     "done": "已處理",
     "steps_other": "{{count}} 步",
-    "failed_other": "{{count}} 步出錯",
     "thinking": "思考中",
     "seconds": "{{s}} 秒",
     "minutes": "{{m}} 分 {{s}} 秒",

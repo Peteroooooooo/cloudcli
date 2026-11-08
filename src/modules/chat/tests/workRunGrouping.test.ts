@@ -102,7 +102,7 @@ test('a long mid-turn note stays visible', () => {
   assert.equal(runs(items).length, 2);
 });
 
-test('the card counts failures and lists changed files without the failed edits', () => {
+test('the card counts every step and lists changed files without the failed edits', () => {
   const items = groupWorkRuns([
     user('go'),
     tool('Edit', { file_path: 'C:\\repo\\a.ts', old_string: '1', new_string: '2' }),
@@ -114,7 +114,7 @@ test('the card counts failures and lists changed files without the failed edits'
 
   const [run] = runs(items);
   assert.equal(run.stepCount, 5);
-  assert.equal(run.errorCount, 2);
+  assert.equal('errorCount' in run, false, 'failures are not summed onto the card');
   assert.deepEqual(run.files.map((file) => [file.path, file.edits.length]), [
     ['C:\\repo\\a.ts', 2],
     ['/repo/new.ts', 1],

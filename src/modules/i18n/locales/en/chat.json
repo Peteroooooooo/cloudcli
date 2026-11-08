@@ -434,8 +434,6 @@
     "done": "Worked",
     "steps_one": "{{count}} step",
     "steps_other": "{{count}} steps",
-    "failed_one": "{{count}} failed",
-    "failed_other": "{{count}} failed",
     "thinking": "Thinking",
     "seconds": "{{s}}s",
     "minutes": "{{m}}m {{s}}s",

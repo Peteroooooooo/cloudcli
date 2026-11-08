@@ -928,7 +928,6 @@ export type WorkRunItem = {
   items: (ChatMessage | ToolGroupItem)[];
   timestamp: ChatMessage['timestamp'];
   stepCount: number;
-  errorCount: number;
   /** Milliseconds from the run's first row to the row after it (its reply), or null when unknown. */
   durationMs: number | null;
   latestStep: WorkRunLatestStep | null;

@@ -1,6 +1,6 @@
 import { memo, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertCircle, CheckCircle2, ChevronDown, Loader2 } from 'lucide-react';
+import { CheckCircle2, ChevronDown, Loader2 } from 'lucide-react';
 
 import type {
   ChatMessage,
@@ -134,10 +134,11 @@ function WorkRunCard({
           aria-expanded={isExpanded}
           aria-label={isExpanded ? t('workRun.collapse') : t('workRun.showSteps')}
         >
+          {/* A failed step is not marked here: agents fail and retry as they
+              work, so it rarely means the turn failed. The step's own row
+              shows the error when the card is opened. */}
           {isLive ? (
             <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-sky-500" aria-hidden />
-          ) : run.errorCount > 0 ? (
-            <AlertCircle className="h-4 w-4 flex-shrink-0 text-red-500 dark:text-red-400" aria-hidden />
           ) : (
             <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-muted-foreground" aria-hidden />
           )}
@@ -145,9 +146,6 @@ function WorkRunCard({
             <span className="block truncate text-[13px] text-foreground">
               <span className="font-medium">{isLive ? t('workRun.working') : t('workRun.done')}</span>
               <span className="text-muted-foreground"> · {t('workRun.steps', { count: run.stepCount })}</span>
-              {run.errorCount > 0 && (
-                <span className="text-red-600 dark:text-red-400"> · {t('workRun.failed', { count: run.errorCount })}</span>
-              )}
               {showDuration && run.durationMs !== null && (
                 <span className="text-muted-foreground"> · {formatDuration(run.durationMs)}</span>
               )}

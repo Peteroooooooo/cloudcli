@@ -163,7 +163,6 @@ function getWorkRun(
     items: groupConsecutiveTools(run, showThinking),
     timestamp: first.timestamp,
     stepCount: run.filter((message) => message.isToolUse).length,
-    errorCount: run.filter(isFailedTool).length,
     durationMs: getDurationMs(first.timestamp, endTimestamp ?? run[run.length - 1].timestamp),
     latestStep: getLatestStep(run, showThinking),
     files: collectFiles(run),
