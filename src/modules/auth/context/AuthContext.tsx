@@ -121,9 +121,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     void hydrateChatDrafts();
   }, [userKey]);
 
-  const checkOnboardingStatus = useCallback(async () => {
+  const applyOnboardingStatus = useCallback(async (request: Promise<Response>) => {
     try {
-      const response = await api.user.onboardingStatus();
+      const response = await request;
       if (!response.ok) {
         return;
       }
@@ -136,6 +136,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setHasCompletedOnboarding(true);
     }
   }, []);
+
+  const checkOnboardingStatus = useCallback(
+    () => applyOnboardingStatus(api.user.onboardingStatus()),
+    [applyOnboardingStatus],
+  );
 
   const refreshOnboardingStatus = useCallback(async () => {
     await checkOnboardingStatus();
@@ -199,25 +204,46 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setIsLoading(true);
       setError(null);
 
-      const statusResponse = await api.auth.status();
+      // Read the stored token instead of depending on `token` state: this
+      // bootstrap flips `isLoading`, which swaps the whole app for the loading
+      // screen, so it must run once on mount and not again on every
+      // X-Refreshed-Token rotation (each one remounted the workspace, #1269).
+      //
+      // With a token, the three startup questions are asked together: one
+      // round trip before the workspace can mount instead of three (each is
+      // 100–130 ms over the relay). Each answer is still read in the old
+      // order, and the server checks the token on every request whatever
+      // order they arrive in.
+      const hasStoredToken = Boolean(readStoredToken());
+      const statusRequest = api.auth.status();
+      const userRequest = hasStoredToken ? api.auth.user() : null;
+      const onboardingRequest = hasStoredToken ? api.user.onboardingStatus() : null;
+      // Their failures surface when each is awaited below; these handlers only
+      // keep a request left unawaited by an early return from being reported
+      // as an unhandled rejection.
+      userRequest?.catch(() => undefined);
+      onboardingRequest?.catch(() => undefined);
+
+      const statusResponse = await statusRequest;
       const statusPayload = await parseJsonSafely<AuthStatusPayload>(statusResponse);
 
       if (statusPayload?.needsSetup) {
+        // A token left over from a wiped database is rejected, and each
+        // rejection reports "session expired"; on the setup screen it means
+        // nothing, so it is cleared once both answers are in.
+        await Promise.allSettled([userRequest, onboardingRequest]);
+        setError(null);
         setNeedsSetup(true);
         return;
       }
 
       setNeedsSetup(false);
 
-      // Read the stored token instead of depending on `token` state: this
-      // bootstrap flips `isLoading`, which swaps the whole app for the loading
-      // screen, so it must run once on mount and not again on every
-      // X-Refreshed-Token rotation (each one remounted the workspace, #1269).
-      if (!readStoredToken()) {
+      if (!userRequest || !onboardingRequest) {
         return;
       }
 
-      const userResponse = await api.auth.user();
+      const userResponse = await userRequest;
       if (!userResponse.ok) {
         clearSession();
         return;
@@ -229,15 +255,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return;
       }
 
+      await applyOnboardingStatus(onboardingRequest);
       setUser(userPayload.user);
-      await checkOnboardingStatus();
     } catch (caughtError) {
       console.error('[Auth] Auth status check failed:', caughtError);
       setError(tRef.current(AUTH_ERROR_MESSAGES.authStatusCheckFailed));
     } finally {
       setIsLoading(false);
     }
-  }, [checkOnboardingStatus, clearSession]);
+  }, [applyOnboardingStatus, clearSession]);
 
   useEffect(() => {
     if (IS_PLATFORM) {

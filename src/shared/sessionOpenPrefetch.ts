@@ -1,6 +1,8 @@
 import { api } from '@/shared/api';
+import { isAuthTokenExpired } from '@/shared/authToken';
 import { SESSION_OPEN_PAGE_SIZE } from '@/shared/constants';
 import type { LLMProvider } from '@/shared/types';
+import { IS_PLATFORM } from '@/shared/utils';
 
 /**
  * Requests a session needs before it can be drawn, started when the pointer
@@ -28,7 +30,8 @@ type PrefetchedResponse = {
 
 type SessionOpenPrefetch = {
   startedAt: number;
-  provider: LLMProvider;
+  /** Null when the session's provider was not known yet, so its model selection was not asked for. */
+  provider: LLMProvider | null;
   history: PrefetchedResponse | null;
   selection: PrefetchedResponse | null;
   tokenUsage: PrefetchedResponse | null;
@@ -79,11 +82,13 @@ function dropExpired(now: number) {
 
 /**
  * Starts the requests that opening this session will make. Calling it again
- * while an earlier prefetch is still fresh does nothing.
+ * while an earlier prefetch is still fresh does nothing. Without a provider
+ * the model selection, the one provider-specific request, is left out.
  *
- * Used by the sidebar's session rows on hover, focus and press.
+ * Used by the sidebar's session rows on hover, focus and press, and at startup
+ * by `prefetchSessionFromAddress`.
  */
-export function prefetchSessionOpen(sessionId: string, provider: LLMProvider): void {
+export function prefetchSessionOpen(sessionId: string, provider: LLMProvider | null): void {
   const now = Date.now();
   dropExpired(now);
   if (!sessionId || prefetches.has(sessionId)) return;
@@ -94,9 +99,34 @@ export function prefetchSessionOpen(sessionId: string, provider: LLMProvider): v
     history: isHistoryHeld(sessionId)
       ? null
       : track(api.providers.sessionMessages(sessionId, { limit: SESSION_OPEN_PAGE_SIZE, offset: 0 })),
-    selection: track(api.providers.sessionActiveModel(provider, sessionId)),
+    selection: provider ? track(api.providers.sessionActiveModel(provider, sessionId)) : null,
     tokenUsage: track(api.providers.sessionTokenUsage(sessionId)),
   });
+}
+
+/** A session page's address, after any router basename: `/session/<id>`. */
+const SESSION_ADDRESS = /\/session\/([A-Za-z0-9_-]+)\/?$/;
+
+/**
+ * Starts the opening requests of the session the page was loaded on.
+ *
+ * Opening the app on a session's address asked for its history only after
+ * sign-in had been checked and the workspace and chat had mounted: four round
+ * trips, about half a second over the relay, before the largest download of
+ * the page began. Started here it downloads during them. Nothing is asked for
+ * without a stored token that is still valid; the server checks it on these
+ * requests like on any other.
+ *
+ * Used once by main.tsx, before the app renders.
+ */
+export function prefetchSessionFromAddress(pathname: string): void {
+  const match = SESSION_ADDRESS.exec(pathname);
+  if (!match) return;
+  if (!IS_PLATFORM) {
+    const token = localStorage.getItem('auth-token');
+    if (!token || isAuthTokenExpired(token)) return;
+  }
+  prefetchSessionOpen(match[1], null);
 }
 
 /** Which of the three prefetched responses a caller wants. */

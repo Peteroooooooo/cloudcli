@@ -110,3 +110,49 @@ describe('session open prefetch', () => {
     assert.equal(sessionMessages.mock.calls.length, 2);
   });
 });
+
+const jwt = (expiresInSeconds: number) => {
+  const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const now = Math.floor(Date.now() / 1000);
+  return `${encode({ alg: 'HS256' })}.${encode({ userId: 1, iat: now - 60, exp: now + expiresInSeconds })}.sig`;
+};
+
+describe('prefetch from the page address', () => {
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it('starts the session history and usage at startup, and leaves the model to chat', async () => {
+    localStorage.setItem('auth-token', jwt(3600));
+    const { prefetchSessionFromAddress, takePrefetchedSessionResponse } = await load();
+    prefetchSessionFromAddress('/session/774302d9-da14-4705-945e-63298eae5cd5');
+
+    assert.deepEqual(sessionMessages.mock.calls.map(([id]) => id), ['774302d9-da14-4705-945e-63298eae5cd5']);
+    assert.equal(sessionTokenUsage.mock.calls.length, 1);
+    assert.equal(sessionActiveModel.mock.calls.length, 0, 'the provider is not known before the session details load');
+    assert.equal(takePrefetchedSessionResponse('774302d9-da14-4705-945e-63298eae5cd5', 'selection', { provider: 'claude' }), null);
+    assert.ok(takePrefetchedSessionResponse('774302d9-da14-4705-945e-63298eae5cd5', 'history'));
+  });
+
+  it('works under a router basename', async () => {
+    localStorage.setItem('auth-token', jwt(3600));
+    const { prefetchSessionFromAddress } = await load();
+    prefetchSessionFromAddress('/cloudcli/session/abc-123/');
+    assert.deepEqual(sessionMessages.mock.calls.map(([id]) => id), ['abc-123']);
+  });
+
+  it('asks for nothing without a usable token or off a session page', async () => {
+    const { prefetchSessionFromAddress } = await load();
+    prefetchSessionFromAddress('/session/abc');
+    const expired = jwt(-3600);
+    localStorage.setItem('auth-token', expired);
+    prefetchSessionFromAddress('/session/abc');
+    assert.equal(localStorage.getItem('auth-token'), expired, 'sign-in, not the prefetch, decides what an expired token means');
+    localStorage.setItem('auth-token', jwt(3600));
+    prefetchSessionFromAddress('/');
+    prefetchSessionFromAddress('/session/abc/files');
+
+    assert.equal(sessionMessages.mock.calls.length, 0);
+    assert.equal(sessionTokenUsage.mock.calls.length, 0);
+  });
+});
