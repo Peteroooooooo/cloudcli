@@ -427,7 +427,12 @@ export function useProjectsState({
     }
   }, [activeTab]);
 
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Whether the mobile sidebar drawer is shown; desktop docks the sidebar and
+  // ignores it. Only the initial value looks at the entry address: opening the
+  // app on mobile without a session in the URL (fresh load, PWA launch, after
+  // sign-in) starts with the drawer open so a session can be picked, while
+  // `/session/<id>` keeps showing that chat. Later navigation never reopens it.
+  const [sidebarOpen, setSidebarOpen] = useState(() => isMobile && !sessionId);
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
   const [loadingProgress, setLoadingProgress] = useState<LoadingProgress | null>(null);
   const [showSettings, setShowSettings] = useState(false);
