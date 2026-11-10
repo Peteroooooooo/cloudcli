@@ -7,8 +7,10 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 const FIT_EPSILON = 0.5;
 
 type TabFitInput = {
-  /** Natural width of every tab, in row order. */
+  /** Natural width of every tab with its icon and label, in row order. */
   widths: number[];
+  /** Natural width of every tab in its compact form (no icon beside the label), in row order. */
+  compactWidths: number[];
   /** Natural width of the overflow trigger, which takes the place of the dropped tabs. */
   triggerWidth: number;
   /** Width the row has to lay the tabs out in. */
@@ -17,23 +19,39 @@ type TabFitInput = {
   activeIndex: number;
 };
 
+type TabFit = {
+  /** The tabs the row keeps, in row order. */
+  visible: number[];
+  /** Whether the kept tabs only fit in their compact form. */
+  compact: boolean;
+};
+
 /**
- * The tabs the row keeps, in row order. Tabs are kept from the left and the
- * active one is always kept, so the strip still shows which section is on
- * screen even when that section's tab would have fallen past the fold.
+ * The kept tabs share the row in equal slots, so a set of tabs fits when its
+ * widest tab fits in one slot, not when the widths merely add up.
  */
-export function fitTabsInRow({ widths, triggerWidth, available, activeIndex }: TabFitInput): number[] {
+const fitsInEqualSlots = (indexes: number[], widths: number[], space: number) =>
+  indexes.length * Math.max(0, ...indexes.map((index) => widths[index])) <= space + FIT_EPSILON;
+
+/**
+ * The tabs the row keeps and the form they are drawn in. The full form is
+ * preferred, then the compact one; only when even that does not fit do tabs
+ * drop into the overflow menu. Tabs are kept from the left and the active one
+ * is always kept, so the strip still shows which section is on screen even
+ * when that section's tab would have fallen past the fold.
+ */
+export function fitTabsInRow({ widths, compactWidths, triggerWidth, available, activeIndex }: TabFitInput): TabFit {
   const everyIndex = widths.map((_, index) => index);
-  const total = widths.reduce((sum, width) => sum + width, 0);
-  if (total <= available + FIT_EPSILON) {
-    return everyIndex;
+  if (fitsInEqualSlots(everyIndex, widths, available)) {
+    return { visible: everyIndex, compact: false };
+  }
+  if (fitsInEqualSlots(everyIndex, compactWidths, available)) {
+    return { visible: everyIndex, compact: true };
   }
 
+  const space = available - triggerWidth;
   const hasActive = activeIndex >= 0 && activeIndex < widths.length;
-  const budget = available - triggerWidth - (hasActive ? widths[activeIndex] : 0);
-
-  const kept: number[] = [];
-  let used = 0;
+  let kept: number[] = hasActive ? [activeIndex] : [];
   for (const index of everyIndex) {
     if (index === activeIndex) {
       continue;
@@ -41,39 +59,42 @@ export function fitTabsInRow({ widths, triggerWidth, available, activeIndex }: T
     // Stop at the first tab that does not fit rather than skipping over it to a
     // narrower one: the strip reads as a left-to-right list, and a hole in the
     // middle of that list looks like a bug.
-    if (used + widths[index] > budget + FIT_EPSILON) {
+    const candidate = [...kept, index];
+    if (!fitsInEqualSlots(candidate, compactWidths, space)) {
       break;
     }
-    used += widths[index];
-    kept.push(index);
+    kept = candidate;
   }
 
-  if (hasActive) {
-    kept.push(activeIndex);
-    kept.sort((first, second) => first - second);
-  }
-  return kept;
+  kept.sort((first, second) => first - second);
+  return { visible: kept, compact: !fitsInEqualSlots(kept, widths, space) };
 }
 
-const isSameIndexes = (first: number[], second: number[]) =>
-  first.length === second.length && first.every((index, position) => index === second[position]);
+const isSameFit = (first: TabFit, second: TabFit) =>
+  first.compact === second.compact
+  && first.visible.length === second.visible.length
+  && first.visible.every((index, position) => index === second.visible[position]);
 
 /**
- * Splits a tab strip into the tabs that fit and the tabs that do not.
+ * Splits a tab strip into the tabs that fit and the tabs that do not, and says
+ * whether the ones that fit need their compact form.
  *
  * `rowRef` goes on the element the tabs must fit into and `mirrorRef` on an
- * off-layout copy of the full strip: once a tab has been dropped it is no
- * longer in the row to be measured, so the natural widths have to come from
- * somewhere that always renders all of them.
+ * off-layout copy of the strip: once a tab has been dropped it is no longer in
+ * the row to be measured, so the natural widths have to come from somewhere
+ * that always renders all of them. The mirror holds every tab in its full
+ * form, then the overflow trigger, then every tab in its compact form.
  */
 export function useTabOverflow(tabCount: number, activeIndex: number) {
   const rowRef = useRef<HTMLDivElement | null>(null);
   const mirrorRef = useRef<HTMLDivElement | null>(null);
-  // The tabs the row has room for. It can only be measured from a laid-out DOM,
-  // so it starts as "all of them" and the first layout pass corrects it.
-  const [visibleIndexes, setVisibleIndexes] = useState<number[]>(() =>
-    Array.from({ length: tabCount }, (_, index) => index),
-  );
+  // The tabs the row has room for and the form they fit in. It can only be
+  // measured from a laid-out DOM, so it starts as "all of them, full" and the
+  // first layout pass corrects it.
+  const [fit, setFit] = useState<TabFit>(() => ({
+    visible: Array.from({ length: tabCount }, (_, index) => index),
+    compact: false,
+  }));
 
   const measure = useCallback(() => {
     const row = rowRef.current;
@@ -83,9 +104,9 @@ export function useTabOverflow(tabCount: number, activeIndex: number) {
     }
 
     const measured = Array.from(mirror.children, (child) => child.getBoundingClientRect().width);
-    // The mirror holds every tab plus the overflow trigger. A different count
-    // means it is mid-render and the widths cannot be trusted yet.
-    if (measured.length !== tabCount + 1) {
+    // The mirror holds every tab twice plus the overflow trigger. A different
+    // count means it is mid-render and the widths cannot be trusted yet.
+    if (measured.length !== tabCount * 2 + 1) {
       return;
     }
 
@@ -100,10 +121,11 @@ export function useTabOverflow(tabCount: number, activeIndex: number) {
     const next = fitTabsInRow({
       widths: measured.slice(0, tabCount),
       triggerWidth: measured[tabCount],
+      compactWidths: measured.slice(tabCount + 1),
       available,
       activeIndex,
     });
-    setVisibleIndexes((current) => (isSameIndexes(current, next) ? current : next));
+    setFit((current) => (isSameFit(current, next) ? current : next));
   }, [tabCount, activeIndex]);
 
   useLayoutEffect(() => {
@@ -124,5 +146,5 @@ export function useTabOverflow(tabCount: number, activeIndex: number) {
     return () => observer.disconnect();
   }, [measure]);
 
-  return { rowRef, mirrorRef, visibleIndexes };
+  return { rowRef, mirrorRef, visibleIndexes: fit.visible, compact: fit.compact };
 }

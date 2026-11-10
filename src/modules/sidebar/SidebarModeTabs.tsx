@@ -1,4 +1,3 @@
-import { Fragment } from 'react';
 import { Folder, MessageSquare, MoreHorizontal, Terminal } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { TFunction } from 'i18next';
@@ -27,9 +26,10 @@ type SidebarModeTabsProps = {
  * Used by SidebarHeader for the section strip above the search box, in both the
  * desktop and the mobile header.
  *
- * The sidebar is resizable, so the strip cannot assume it has room for all
- * three tabs: the ones that no longer fit move into a "…" dropdown at its right edge
- * instead of spilling out over the panel.
+ * The tabs split the strip into equal widths. The sidebar is resizable, so the
+ * strip cannot assume each share has room for an icon and a label: first the
+ * labelled tabs drop their icons, and the tabs that still do not fit move into a
+ * "…" dropdown at its right edge instead of spilling out over the panel.
  */
 export default function SidebarModeTabs({
   searchMode,
@@ -44,14 +44,20 @@ export default function SidebarModeTabs({
   ];
 
   const activeIndex = tabs.findIndex((tab) => tab.mode === searchMode);
-  const { rowRef, mirrorRef, visibleIndexes } = useTabOverflow(tabs.length, activeIndex);
+  const { rowRef, mirrorRef, visibleIndexes, compact } = useTabOverflow(tabs.length, activeIndex);
   const hiddenTabs = tabs.filter((_, index) => !visibleIndexes.includes(index));
   const runningBadgeText = runningSessionsCount > 99 ? '99+' : String(runningSessionsCount);
   const moreLabel = t('search.modeMore', 'More');
 
-  const renderTab = (tab: ModeTab, canGrow: boolean) => {
+  /**
+   * `isCompact` is the form for a slot too narrow for icon and label together:
+   * the labelled tabs keep their full label and drop the icon beside it, since
+   * the word says more than the picture. Icon-only tabs look the same either way.
+   */
+  const renderTab = (tab: ModeTab, isCompact: boolean) => {
     const isActive = tab.mode === searchMode;
     const Icon = tab.icon;
+    const showIcon = !tab.showLabel || !isCompact;
 
     const button = (
       <button
@@ -60,8 +66,8 @@ export default function SidebarModeTabs({
         aria-label={tab.showLabel ? undefined : tab.label}
         title={tab.showLabel ? undefined : tab.label}
         className={cn(
-          'flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-normal transition-all',
-          canGrow && tab.showLabel && 'flex-1',
+          'flex w-full min-w-0 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-normal transition-all',
+          isCompact && tab.showLabel ? 'px-1' : 'px-2',
           isActive
             ? 'bg-background text-foreground shadow-sm'
             : 'text-muted-foreground hover:text-foreground',
@@ -72,13 +78,13 @@ export default function SidebarModeTabs({
           <span className="relative flex h-3 w-3 items-center justify-center">
             <Terminal className={cn('h-3 w-3', runningSessionsCount > 0 && 'text-sky-600 dark:text-sky-400')} />
             {runningSessionsCount > 0 && (
-              <span className="absolute -right-2.5 -top-2 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-sky-500 px-0.5 text-[8px] font-semibold leading-none text-white shadow-sm ring-1 ring-background">
+              <span className="absolute -right-2.5 -top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-sky-500 px-0.5 text-[8px] font-semibold leading-none text-white shadow-sm ring-1 ring-background">
                 {runningBadgeText}
               </span>
             )}
           </span>
         ) : (
-          <Icon className="h-3 w-3" />
+          showIcon && <Icon className="h-3 w-3 flex-none" />
         )}
         {tab.showLabel && <span className="truncate">{tab.label}</span>}
       </button>
@@ -111,16 +117,25 @@ export default function SidebarModeTabs({
   return (
     <div className="rounded-lg bg-muted/50 p-0.5">
       <div ref={rowRef} className="relative flex">
+        {/*
+          Every tab in the row gets an equal share of it, whatever its content.
+          The slot, not the tab, is the flex item because the icon-only tabs sit
+          inside a Tooltip wrapper.
+        */}
         {visibleIndexes.map((index) => (
-          <Fragment key={tabs[index].mode}>{renderTab(tabs[index], true)}</Fragment>
+          <div key={tabs[index].mode} className="flex min-w-0 flex-1 basis-0 *:min-w-0 *:flex-1">
+            {renderTab(tabs[index], compact)}
+          </div>
         ))}
         {hiddenTabs.length > 0 && overflowTrigger}
 
         {/*
-          An off-layout copy of the whole strip. What to drop can only be decided
-          from every tab's natural width, and a tab that has already been dropped
-          is no longer in the row to measure. Clipped rather than merely hidden so
-          it cannot widen an ancestor's scroll area.
+          An off-layout copy of the whole strip. Which form to draw and what to
+          drop can only be decided from every tab's natural width in both forms,
+          and a tab that has already been dropped is no longer in the row to
+          measure. Clipped rather than merely hidden so it cannot widen an
+          ancestor's scroll area. Order matters to useTabOverflow: full tabs,
+          the trigger, then compact tabs.
         */}
         <div aria-hidden className="pointer-events-none invisible absolute inset-0 overflow-hidden">
           <div ref={mirrorRef} className="flex w-max">
@@ -128,6 +143,9 @@ export default function SidebarModeTabs({
               <div key={tab.mode} className="flex-none">{renderTab(tab, false)}</div>
             ))}
             <div className="flex-none">{overflowTrigger}</div>
+            {tabs.map((tab) => (
+              <div key={`${tab.mode}-compact`} className="flex-none">{renderTab(tab, true)}</div>
+            ))}
           </div>
         </div>
       </div>

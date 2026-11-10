@@ -10,8 +10,9 @@ import SidebarModeTabs from '@/modules/sidebar/SidebarModeTabs';
 /**
  * The strip has to survive a sidebar dragged down to its 220px minimum. jsdom
  * does no layout, so widths are stubbed: the row reports the width under test
- * and every other element a width derived from its label, which is enough for
- * the component to split the tabs the way a browser would.
+ * and every other element a width derived from its label and whether it holds
+ * an icon, which is enough for the component to split the tabs the way a
+ * browser would.
  */
 
 const LABELS: Record<string, string> = {
@@ -28,7 +29,8 @@ const stubLayout = (rowWidth: number) => {
     // The row is the only `relative flex` element in the strip; the tabs are
     // wrapped in `flex-none` and the menus in `relative inline-flex`.
     const isRow = this.classList.contains('relative') && this.classList.contains('flex');
-    const width = isRow ? rowWidth : 34 + 7 * (this.textContent?.trim().length ?? 0);
+    const iconWidth = this.querySelector('svg') ? 18 : 0;
+    const width = isRow ? rowWidth : 16 + iconWidth + 7 * (this.textContent?.trim().length ?? 0);
     return { width, height: 28, top: 0, left: 0, right: width, bottom: 28, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
   });
 };
@@ -63,6 +65,24 @@ test('there is no archive section to switch to', () => {
     screen.getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent?.trim()),
     ['Projects', 'Conversations', 'Running sessions'],
   );
+});
+
+test('a row too narrow for icon and label in every third keeps the labels and drops their icons', () => {
+  // Conversations needs 125px with its icon, more than a third of 330, and
+  // 107px without it, which fits.
+  renderTabs(330, 'projects');
+
+  assert.equal(screen.getByRole('button', { name: 'Projects' }).querySelector('svg'), null);
+  assert.equal(screen.getByRole('button', { name: 'Conversations' }).querySelector('svg'), null);
+  assert.ok(screen.getByRole('button', { name: 'Running sessions' }).querySelector('svg'));
+  assert.equal(screen.queryByRole('button', { name: 'More' }), null);
+});
+
+test('a wide row keeps the icons beside the labels', () => {
+  renderTabs(400, 'projects');
+
+  assert.ok(screen.getByRole('button', { name: 'Projects' }).querySelector('svg'));
+  assert.ok(screen.getByRole('button', { name: 'Conversations' }).querySelector('svg'));
 });
 
 test('a narrow row moves the tabs that no longer fit into the dropdown', () => {
