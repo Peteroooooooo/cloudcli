@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 
 import { IS_PLATFORM } from '@/shared/utils';
 import { api, readApiErrorMessage } from '@/shared/api';
-import { AUTH_SESSION_EXPIRED_EVENT, AUTH_TOKEN_REFRESHED_EVENT, getAuthTokenRefreshDelay, isValidRefreshedToken, storeAuthToken } from '@/shared/authToken';
+import { AUTH_SESSION_EXPIRED_EVENT, AUTH_TOKEN_REFRESHED_EVENT, getAuthTokenRefreshDelay, isAuthTokenExpired, isValidRefreshedToken, storeAuthToken } from '@/shared/authToken';
 import { hydrateChatDrafts, resetChatDrafts } from '@/shared/chatDrafts';
 import { hydrateUserPreferences, resetUserPreferences } from '@/shared/userSettings';
 /** The signed-in account held by AuthContext - a required `username` plus an optional id and any additional fields the auth API returns - and should be read through `useAuth()` rather than re-derived from raw auth responses. */
@@ -199,6 +199,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     tRef.current = t;
   }, [t]);
 
+  // The token the page was opened with, read on the first render. Child
+  // providers' effects run before this provider's, so their first request can
+  // find that token expired and drop it, announcing the expiry before anything
+  // here listens; the startup check below would then see no token at all.
+  const openingTokenRef = useRef(token);
+
   const checkAuthStatus = useCallback(async () => {
     try {
       setIsLoading(true);
@@ -214,7 +220,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // 100–130 ms over the relay). Each answer is still read in the old
       // order, and the server checks the token on every request whatever
       // order they arrive in.
-      const hasStoredToken = Boolean(readStoredToken());
+      const openedWithExpiredToken = isAuthTokenExpired(openingTokenRef.current);
+      const hasStoredToken = Boolean(readStoredToken()) && !openedWithExpiredToken;
       const statusRequest = api.auth.status();
       const userRequest = hasStoredToken ? api.auth.user() : null;
       const onboardingRequest = hasStoredToken ? api.user.onboardingStatus() : null;
@@ -238,6 +245,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       setNeedsSetup(false);
+
+      if (openedWithExpiredToken) {
+        clearSession();
+        setError(tRef.current(AUTH_ERROR_MESSAGES.sessionExpired));
+        return;
+      }
 
       if (!userRequest || !onboardingRequest) {
         return;

@@ -174,6 +174,24 @@ test('an auth error on the response ends the session', async () => {
   assert.equal(localStorage.getItem('auth-token'), null);
 });
 
+test('an auth error on a request sent without a token is not a session expiry', async () => {
+  // Before sign-in the app's provider requests go out tokenless and are refused
+  // with X-Auth-Error. Reading that as an expiry put "session expired" on the
+  // sign-in screen of a browser that had never signed in.
+  let expiries = 0;
+  const onExpired = () => {
+    expiries += 1;
+  };
+  window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, onExpired);
+  respondWith({ 'X-Auth-Error': 'invalid-token' }, 401);
+
+  const response = await (await loadFetch(false))('/api/plugins');
+
+  window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, onExpired);
+  assert.equal(response.status, 401);
+  assert.equal(expiries, 0);
+});
+
 test('an auth error replayed by a cached response does not end the session', async () => {
   const live = liveToken();
   localStorage.setItem('auth-token', live);

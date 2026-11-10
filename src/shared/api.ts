@@ -21,6 +21,8 @@ export const authenticatedFetch = (
   const token = getStoredAuthToken();
 
   const defaultHeaders: Record<string, string> = {};
+  // A platform build's session is a cookie, which every request carries.
+  const sentCredential = IS_PLATFORM || Boolean(token);
 
   // Only set Content-Type for non-FormData requests
   if (!(options.body instanceof FormData)) {
@@ -52,7 +54,11 @@ export const authenticatedFetch = (
     // real rejection ends the session. Note that a revalidated response surfaces
     // its stored status (typically 200), not the 304 from the wire, so the
     // header alone says nothing about the current request.
-    if (response.status === 401 && response.headers.get('X-Auth-Error')) {
+    //
+    // A request sent without a token had no session to end: the requests the
+    // app makes before anyone signs in are all refused this way, and reading
+    // that as an expiry put "session expired" on a first visit's sign-in screen.
+    if (sentCredential && response.status === 401 && response.headers.get('X-Auth-Error')) {
       expireAuthSession();
     }
     return response;

@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { useEffect } from 'react';
 import { afterEach, beforeEach, test, vi } from 'vitest';
 
 import { AuthProvider, useAuth } from '@/modules/auth/context/AuthContext';
+import { api } from '@/shared/api';
 import '@/modules/i18n';
 
 /**
@@ -110,4 +112,50 @@ test('without a stored token only the setup question is asked', async () => {
 
   await screen.findByText('login');
   assert.deepEqual(startupRequests(), ['/api/auth/status']);
+});
+
+test('a first visit shows sign-in without a session-expired message', async () => {
+  // Providers outside the sign-in gate (plugins, TaskMaster) ask the server
+  // before anyone has signed in and are refused for having no token.
+  localStorage.clear();
+  replies['/api/plugins'] = { status: 401, authError: true, body: { error: 'no token' } };
+  render(<AuthProvider><Gate /></AuthProvider>);
+  await screen.findByText('login');
+
+  await api.plugins.list();
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(document.body.textContent, 'login');
+});
+
+test('a stored token the server rejects shows the session-expired message', async () => {
+  replies['/api/auth/user'] = { status: 401, authError: true, body: { error: 'invalid token' } };
+  replies['/api/user/onboarding-status'] = { status: 401, authError: true, body: { error: 'invalid token' } };
+  render(<AuthProvider><Gate /></AuthProvider>);
+
+  await screen.findByText('login error:Your session expired. Please log in again.');
+});
+
+// Like the plugins provider: a child whose effect makes a request on mount.
+// Child effects run before the AuthProvider's, so its request is the first to
+// read the stored token.
+function EarlyRequester() {
+  useEffect(() => {
+    void api.plugins.list();
+  }, []);
+  return null;
+}
+
+test('a token that expired while away shows the session-expired message', async () => {
+  const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const now = Math.floor(Date.now() / 1000);
+  localStorage.setItem(
+    'auth-token',
+    `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ userId: 1, iat: now - 90000, exp: now - 3600 })}.sig`,
+  );
+  replies['/api/plugins'] = { status: 401, authError: true, body: { error: 'no token' } };
+  render(<AuthProvider><EarlyRequester /><Gate /></AuthProvider>);
+
+  await screen.findByText('login error:Your session expired. Please log in again.');
+  assert.equal(localStorage.getItem('auth-token'), null);
 });
