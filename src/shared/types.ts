@@ -1079,6 +1079,35 @@ export type FileTreeImageSelection = {
   projectId: string;
 };
 
+/** Load state of one folder in the on-demand file tree, read by the tree rows to draw a loading, error or "show more" row under an expanded folder; `remaining` counts children not fetched yet. */
+export type FileTreeDirectoryStatus = {
+  loaded: boolean;
+  loading: boolean;
+  error: string | null;
+  remaining: number;
+};
+
+/** One page of a folder's direct children from `api.listDirectory`; the file tree caches one per expanded folder and the folder ZIP download pages through them. Entries never carry `children`; `hasMore` means further pages exist and `total` counts every visible child. */
+export type FileTreeDirectoryListing = {
+  path: string;
+  entries: FileTreeNode[];
+  total: number;
+  offset: number;
+  hasMore: boolean;
+  truncated: boolean;
+};
+
+/** One hit from `api.searchFiles`: a file tree entry plus its project-relative path with `/` separators, which the chat `@` picker inserts and the file tree uses to rebuild the matching folders. */
+export type FileTreeSearchResult = FileTreeNode & {
+  relativePath: string;
+};
+
+/** Body of `api.searchFiles`: hits in fully expanded tree order, and whether the server stopped early (result cap or walk budget), so more matches may exist. */
+export type FileTreeSearchResponse = {
+  results: FileTreeSearchResult[];
+  truncated: boolean;
+};
+
 
 /** Whether a file tree entry is a file or a directory; use it instead of repeating the string union wherever `FileTreeNode`-shaped data is handled. */
 type FileTreeItemType = 'file' | 'directory';

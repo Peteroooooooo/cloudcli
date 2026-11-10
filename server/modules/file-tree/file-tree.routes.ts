@@ -3,6 +3,7 @@ import type { NextFunction, Request, RequestHandler, Response } from 'express';
 
 import type {
   FileTreeLogger,
+  FileTreeSearchInput,
   FileTreeServices,
   FileTreeUploadedFile,
 } from '@/shared/types.js';
@@ -69,6 +70,50 @@ function readRelativePaths(value: unknown): string[] {
 function readRequestedFileCount(value: unknown, fallbackCount: number): number {
   const parsedCount = typeof value === 'string' ? Number.parseInt(value, 10) : Number.NaN;
   return Number.isFinite(parsedCount) && parsedCount > 0 ? parsedCount : fallbackCount;
+}
+
+// Page size for the on-demand directory listing. The browser shows one page
+// and offers the rest behind a "show more" row.
+const DEFAULT_DIRECTORY_PAGE_SIZE = 500;
+const MAXIMUM_DIRECTORY_PAGE_SIZE = 2_000;
+
+const DEFAULT_SEARCH_RESULT_LIMIT = 100;
+const MAXIMUM_SEARCH_RESULT_LIMIT = 1_000;
+const MAXIMUM_SEARCH_QUERY_LENGTH = 256;
+
+// An absent value takes the default; anything else must be an integer within
+// the bounds, so a typo is a 400 instead of a silently different page.
+function readBoundedInteger(
+  value: unknown,
+  fieldName: string,
+  defaultValue: number,
+  minimum: number,
+  maximum: number,
+): number {
+  if (value === undefined || value === '') {
+    return defaultValue;
+  }
+  const parsedValue = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : Number.NaN;
+  if (!Number.isSafeInteger(parsedValue) || parsedValue < minimum || parsedValue > maximum) {
+    throw new AppError(`${fieldName} must be an integer from ${minimum} to ${maximum}`, {
+      code: 'INVALID_FILE_TREE_REQUEST',
+      statusCode: 400,
+    });
+  }
+  return parsedValue;
+}
+
+function readSearchMatchMode(value: unknown): FileTreeSearchInput['match'] {
+  if (value === undefined || value === '') {
+    return 'path';
+  }
+  if (value !== 'name' && value !== 'path' && value !== 'basename') {
+    throw new AppError('match must be "name", "path" or "basename"', {
+      code: 'INVALID_FILE_TREE_REQUEST',
+      statusCode: 400,
+    });
+  }
+  return value;
 }
 
 function normalizeUploadedFiles(request: UploadedRequest): FileTreeUploadedFile[] {
@@ -165,6 +210,62 @@ export function createFileTreeRouter(
     response.json(await services.listProjectFiles(readProjectId(request), {
       respectGitignore: request.query.respectGitignore === 'true',
     }));
+  }, logger));
+
+  router.get('/projects/:projectId/files/children', createRouteHandler(async (request, response) => {
+    response.json(await services.listDirectory(readProjectId(request), {
+      directoryPath: readOptionalString(request.query.path) || null,
+      offset: readBoundedInteger(request.query.offset, 'offset', 0, 0, Number.MAX_SAFE_INTEGER),
+      limit: readBoundedInteger(
+        request.query.limit,
+        'limit',
+        DEFAULT_DIRECTORY_PAGE_SIZE,
+        1,
+        MAXIMUM_DIRECTORY_PAGE_SIZE,
+      ),
+      respectGitignore: request.query.respectGitignore === 'true',
+    }));
+  }, logger));
+
+  router.get('/projects/:projectId/files/search', createRouteHandler(async (request, response) => {
+    const searchQuery = readOptionalString(request.query.q) ?? '';
+    if (searchQuery.length > MAXIMUM_SEARCH_QUERY_LENGTH) {
+      throw new AppError(`q must be at most ${MAXIMUM_SEARCH_QUERY_LENGTH} characters`, {
+        code: 'INVALID_FILE_TREE_REQUEST',
+        statusCode: 400,
+      });
+    }
+
+    // The browser aborts a search the user has typed past; stop walking then.
+    // `close` also fires after a normal response, when there is nothing left
+    // to cancel, so only an unfinished response counts as an abort.
+    const abortController = new AbortController();
+    response.on('close', () => {
+      if (!response.writableFinished) {
+        abortController.abort();
+      }
+    });
+
+    try {
+      response.json(await services.searchProjectFiles(readProjectId(request), {
+        query: searchQuery,
+        match: readSearchMatchMode(request.query.match),
+        filesOnly: request.query.filesOnly === 'true',
+        limit: readBoundedInteger(
+          request.query.limit,
+          'limit',
+          DEFAULT_SEARCH_RESULT_LIMIT,
+          1,
+          MAXIMUM_SEARCH_RESULT_LIMIT,
+        ),
+        respectGitignore: request.query.respectGitignore === 'true',
+        signal: abortController.signal,
+      }));
+    } catch (error) {
+      // Nobody is listening for the answer to a cancelled search.
+      if (abortController.signal.aborted) return;
+      throw error;
+    }
   }, logger));
 
   router.post('/projects/:projectId/files/create', createRouteHandler(async (request, response) => {

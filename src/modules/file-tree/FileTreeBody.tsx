@@ -2,7 +2,7 @@ import type { DragEvent, ReactNode, RefObject } from 'react';
 import { AlertTriangle, Folder, Search } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import type { FileTreeNode, FileTreeViewMode } from '@/shared/types';
+import type { FileTreeDirectoryStatus, FileTreeNode, FileTreeViewMode } from '@/shared/types';
 import FileTreeEmptyState from '@/modules/file-tree/FileTreeEmptyState';
 import FileTreeList from '@/modules/file-tree/FileTreeList';
 
@@ -11,6 +11,10 @@ type FileTreeBodyProps = {
   filteredFiles: FileTreeNode[];
   error?: string | null;
   searchQuery: string;
+  // The server search for the current query has not answered yet.
+  searching?: boolean;
+  // The server stopped the search early, so more matches may exist.
+  searchTruncated?: boolean;
   viewMode: FileTreeViewMode;
   expandedDirs: Set<string>;
   onItemClick: (item: FileTreeNode) => void;
@@ -36,6 +40,9 @@ type FileTreeBodyProps = {
   handleCancelRename?: () => void;
   renameInputRef?: RefObject<HTMLInputElement>;
   operationLoading?: boolean;
+  // On-demand loading: absent for search results, which arrive complete.
+  getDirectoryStatus?: (directoryPath: string) => FileTreeDirectoryStatus;
+  onLoadMore?: (directoryPath: string) => void;
 };
 
 /** Rendered by FileTree to choose between the empty/error states and the file list. */
@@ -44,6 +51,8 @@ export default function FileTreeBody({
   filteredFiles,
   error,
   searchQuery,
+  searching = false,
+  searchTruncated = false,
   viewMode,
   expandedDirs,
   onItemClick,
@@ -67,6 +76,8 @@ export default function FileTreeBody({
   handleCancelRename,
   renameInputRef,
   operationLoading,
+  getDirectoryStatus,
+  onLoadMore,
 }: FileTreeBodyProps) {
   const { t } = useTranslation();
 
@@ -84,6 +95,10 @@ export default function FileTreeBody({
           title={t('fileTree.noFilesFound')}
           description={t('fileTree.checkProjectPath')}
         />
+      ) : filteredFiles.length === 0 && searchQuery && searching ? (
+        <div className="py-8 text-center text-sm text-muted-foreground">
+          {t('fileTree.searching', 'Searching...')}
+        </div>
       ) : filteredFiles.length === 0 && searchQuery ? (
         <FileTreeEmptyState
           icon={Search}
@@ -116,7 +131,14 @@ export default function FileTreeBody({
           handleCancelRename={handleCancelRename}
           renameInputRef={renameInputRef}
           operationLoading={operationLoading}
+          getDirectoryStatus={getDirectoryStatus}
+          onLoadMore={onLoadMore}
         />
+      )}
+      {searchQuery && searchTruncated && filteredFiles.length > 0 && (
+        <p className="px-1 py-2 text-xs text-muted-foreground">
+          {t('fileTree.searchTruncated', 'More matches were not shown. Refine your search.')}
+        </p>
       )}
     </>
   );

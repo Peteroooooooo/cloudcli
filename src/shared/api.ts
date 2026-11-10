@@ -325,8 +325,34 @@ export const api = {
     get(fileContentPath(projectId, filePath), options),
   saveFile: (projectId: string, filePath: string, content: string) =>
     put(`/api/file-tree/projects/${projectId}/file`, { filePath, content }),
-  getFiles: (projectId: string, options: ApiRequestOptions = {}) =>
-    get(`/api/file-tree/projects/${projectId}/files${query({ respectGitignore: true })}`, options),
+  // One page of a folder's direct children; omit `path` for the project root.
+  // The tree loads folders as they are expanded instead of the whole project.
+  listDirectory: (
+    projectId: string,
+    { path, offset, limit }: { path?: string | null; offset?: number; limit?: number } = {},
+    options: ApiRequestOptions = {},
+  ) =>
+    get(
+      `/api/file-tree/projects/${projectId}/files/children${query({ path, offset, limit, respectGitignore: true })}`,
+      options,
+    ),
+  // Bounded server-side name/path search over the project, in tree order. An
+  // empty `q` returns the first `limit` entries. `match` is `name`, `path`
+  // (project-relative, `/`-separated) or `basename` (whole name).
+  searchFiles: (
+    projectId: string,
+    {
+      q,
+      match = 'path',
+      filesOnly = false,
+      limit,
+    }: { q: string; match?: 'name' | 'path' | 'basename'; filesOnly?: boolean; limit?: number },
+    options: ApiRequestOptions = {},
+  ) =>
+    get(
+      `/api/file-tree/projects/${projectId}/files/search${query({ q, match, filesOnly, limit, respectGitignore: true })}`,
+      options,
+    ),
 
   // File operations
   createFile: (

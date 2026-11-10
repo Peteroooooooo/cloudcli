@@ -58,6 +58,7 @@ const renderOperations = () => {
   const { result } = renderHook(() => useFileTreeOperations({
     selectedProject: null,
     onRefresh: () => {},
+    onEntryChanged: () => {},
     showToast,
   }));
   return { result, toasts: () => showToast.mock.calls };

@@ -30,6 +30,12 @@ export function useExpandedDirectories(): UseExpandedDirectoriesResult {
     }
 
     setExpandedDirs((previous) => {
+      // Keeping the same Set when nothing is new stops a caller that expands
+      // on every render (the folder reveal waits for folders to load) from
+      // re-rendering the tree in a loop.
+      if (paths.every((path) => previous.has(path))) {
+        return previous;
+      }
       const next = new Set(previous);
       paths.forEach((path) => next.add(path));
       return next;

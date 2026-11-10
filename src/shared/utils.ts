@@ -2,6 +2,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
 import type {
+  FileTreeSearchResponse,
   LLMProvider,
   Project,
   ProjectSession,
@@ -316,4 +317,22 @@ export const matchesSessionProviderFilter = (provider: unknown, filter: SessionP
   }
   const sessionProvider = typeof provider === 'string' && provider.trim() ? provider : 'claude';
   return sessionProvider === filter;
+};
+
+// ---------------------------
+
+//----------------- PROJECT FILE SEARCH ------------
+
+/**
+ * Reads the body of `api.searchFiles` defensively: anything that is not the
+ * expected shape (an error body, a proxy page) reads as no results, so the
+ * file tree, the command palette, the chat `@` picker and the file-link
+ * resolver never crash on a bad response.
+ */
+export const readFileSearchResponse = (data: unknown): FileTreeSearchResponse => {
+  const body = typeof data === 'object' && data !== null ? data as Partial<FileTreeSearchResponse> : {};
+  return {
+    results: Array.isArray(body.results) ? body.results : [],
+    truncated: body.truncated === true,
+  };
 };

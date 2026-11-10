@@ -1,7 +1,11 @@
 import type { DragEvent, ReactNode, RefObject } from 'react';
 
-import type { FileTreeNode as FileTreeNodeType, FileTreeViewMode } from '@/shared/types';
+import type { FileTreeDirectoryStatus, FileTreeNode as FileTreeNodeType, FileTreeViewMode } from '@/shared/types';
+import FileTreeDirectoryStatusRows from '@/modules/file-tree/FileTreeDirectoryStatusRows';
 import FileTreeNode from '@/modules/file-tree/FileTreeNode';
+
+// Cache key the tree data hook uses for the project root.
+const ROOT_DIRECTORY_KEY = '';
 
 type FileTreeListProps = {
   items: FileTreeNodeType[];
@@ -30,6 +34,9 @@ type FileTreeListProps = {
   handleCancelRename?: () => void;
   renameInputRef?: RefObject<HTMLInputElement>;
   operationLoading?: boolean;
+  // On-demand loading: absent for search results, which arrive complete.
+  getDirectoryStatus?: (directoryPath: string) => FileTreeDirectoryStatus;
+  onLoadMore?: (directoryPath: string) => void;
 };
 
 /** Rendered by FileTreeBody to lay out the tree rows for the active view mode. */
@@ -58,6 +65,8 @@ export default function FileTreeList({
   handleCancelRename,
   renameInputRef,
   operationLoading,
+  getDirectoryStatus,
+  onLoadMore,
 }: FileTreeListProps) {
   return (
     <div>
@@ -89,8 +98,18 @@ export default function FileTreeList({
           handleCancelRename={handleCancelRename}
           renameInputRef={renameInputRef}
           operationLoading={operationLoading}
+          getDirectoryStatus={getDirectoryStatus}
+          onLoadMore={onLoadMore}
         />
       ))}
+      {getDirectoryStatus && (
+        <FileTreeDirectoryStatusRows
+          directoryPath={ROOT_DIRECTORY_KEY}
+          status={getDirectoryStatus(ROOT_DIRECTORY_KEY)}
+          level={0}
+          onLoadMore={onLoadMore}
+        />
+      )}
     </div>
   );
 }

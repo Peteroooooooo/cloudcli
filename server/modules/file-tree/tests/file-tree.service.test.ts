@@ -674,3 +674,331 @@ test('a file in another folder of the workspace can be read, but never written t
     await fsPromises.rm(outsideDirectory, { recursive: true, force: true });
   }
 });
+
+/**
+ * A small fake project for the on-demand listing and the search. Every folder
+ * is described by its children, which the fake directory reader returns in a
+ * deliberately unsorted order.
+ */
+function createFakeProjectFileSystem(
+  projectRoot: string,
+  layout: Record<string, Array<[name: string, directory: boolean]>>,
+  overrides: Partial<FileTreeFileSystem> = {},
+) {
+  const readDirectories: string[] = [];
+  const directoryPaths = new Set(Object.keys(layout).map((relative) => path.join(projectRoot, relative)));
+  directoryPaths.add(projectRoot);
+  const fileSystem = createFakeFileSystem({
+    access: async () => undefined,
+    realpath: async (candidatePath) => candidatePath,
+    stat: async (candidatePath) => createStats(directoryPaths.has(candidatePath), 0o755),
+    readTextFile: async () => {
+      throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+    },
+    openDirectory: createDirectoryReader((directoryPath) => {
+      readDirectories.push(directoryPath);
+      const relative = path.relative(projectRoot, directoryPath);
+      return (layout[relative] ?? []).map(([name, directory]) => createDirectoryEntry(name, directory));
+    }),
+    lstat: async (candidatePath) => createStats(directoryPaths.has(candidatePath), 0o644),
+    ...overrides,
+  });
+  return { fileSystem, readDirectories };
+}
+
+const sampleLayout: Record<string, Array<[string, boolean]>> = {
+  '': [['README.md', false], ['src', true], ['node_modules', true], ['assets', true], ['build', true]],
+  src: [['main.ts', false], ['lib', true], ['logo-helper.ts', false]],
+  [path.join('src', 'lib')]: [['logo.ts', false]],
+  assets: [['logo-128.png', false], ['banner.png', false]],
+  build: [['logo-built.png', false]],
+};
+
+test('listDirectory returns one folder level, sorted, without reading deeper', async () => {
+  const projectRoot = path.resolve('file-tree-test-project');
+  const { fileSystem, readDirectories } = createFakeProjectFileSystem(projectRoot, sampleLayout);
+  const service = createFileTreeService(createDependencies(fileSystem, projectRoot));
+
+  const rootListing = await service.listDirectory('project-1', {
+    directoryPath: null, offset: 0, limit: 500, respectGitignore: true,
+  });
+
+  // Hard exclusions and the fallback names apply, folders come first.
+  assert.deepEqual(rootListing.entries.map((entry) => entry.name), ['assets', 'src', 'README.md']);
+  assert.equal(rootListing.path, projectRoot);
+  assert.equal(rootListing.total, 3);
+  assert.equal(rootListing.hasMore, false);
+  assert.equal(rootListing.entries[0]?.children, undefined);
+  assert.equal(rootListing.entries[2]?.permissions, '644');
+  assert.deepEqual(readDirectories, [projectRoot]);
+
+  const sourceListing = await service.listDirectory('project-1', {
+    directoryPath: path.join(projectRoot, 'src'), offset: 0, limit: 500, respectGitignore: true,
+  });
+  assert.deepEqual(sourceListing.entries.map((entry) => entry.path), [
+    path.join(projectRoot, 'src', 'lib'),
+    path.join(projectRoot, 'src', 'logo-helper.ts'),
+    path.join(projectRoot, 'src', 'main.ts'),
+  ]);
+
+  // A project-relative folder and the root spelled out both work too.
+  const relativeListing = await service.listDirectory('project-1', {
+    directoryPath: 'src', offset: 0, limit: 500, respectGitignore: true,
+  });
+  assert.equal(relativeListing.path, path.join(projectRoot, 'src'));
+  const explicitRoot = await service.listDirectory('project-1', {
+    directoryPath: projectRoot, offset: 0, limit: 500, respectGitignore: true,
+  });
+  assert.equal(explicitRoot.total, 3);
+});
+
+test('listDirectory pages a huge folder and only reads metadata for the page', async () => {
+  const projectRoot = path.resolve('file-tree-test-project');
+  const lstatPaths: string[] = [];
+  const { fileSystem } = createFakeProjectFileSystem(projectRoot, {
+    '': Array.from({ length: 12_000 }, (_, index): [string, boolean] => [`file-${String(index).padStart(5, '0')}.txt`, false]),
+  }, {
+    lstat: async (candidatePath) => {
+      lstatPaths.push(candidatePath);
+      return createStats(false, 0o644);
+    },
+  });
+  const service = createFileTreeService(createDependencies(fileSystem, projectRoot));
+
+  const firstPage = await service.listDirectory('project-1', {
+    directoryPath: null, offset: 0, limit: 500, respectGitignore: false,
+  });
+  assert.equal(firstPage.entries.length, 500);
+  assert.equal(firstPage.total, 12_000);
+  assert.equal(firstPage.hasMore, true);
+  assert.equal(firstPage.truncated, false);
+  assert.equal(firstPage.entries[0]?.name, 'file-00000.txt');
+  assert.equal(lstatPaths.length, 500);
+
+  const lastPage = await service.listDirectory('project-1', {
+    directoryPath: null, offset: 11_500, limit: 2_000, respectGitignore: false,
+  });
+  assert.equal(lastPage.entries.length, 500);
+  assert.equal(lastPage.entries.at(-1)?.name, 'file-11999.txt');
+  assert.equal(lastPage.hasMore, false);
+});
+
+test('listDirectory refuses folders outside the project before reading them', async () => {
+  const projectRoot = path.resolve('file-tree-test-project');
+  const { fileSystem, readDirectories } = createFakeProjectFileSystem(projectRoot, sampleLayout);
+  const service = createFileTreeService(createDependencies(fileSystem, projectRoot));
+
+  for (const outsidePath of [path.join('..', 'other'), path.join(projectRoot, '..'), `${projectRoot}-sibling`]) {
+    await assert.rejects(
+      service.listDirectory('project-1', { directoryPath: outsidePath, offset: 0, limit: 500, respectGitignore: false }),
+      isOutsideProjectError,
+      outsidePath,
+    );
+  }
+  assert.deepEqual(readDirectories, []);
+});
+
+test('listDirectory refuses a folder whose real path leaves the project', async () => {
+  const projectRoot = path.resolve('file-tree-test-project');
+  const linkPath = path.join(projectRoot, 'escape');
+  const { fileSystem, readDirectories } = createFakeProjectFileSystem(projectRoot, sampleLayout, {
+    realpath: async (candidatePath) => candidatePath === linkPath ? path.resolve('outside-the-project') : candidatePath,
+  });
+  const service = createFileTreeService(createDependencies(fileSystem, projectRoot));
+
+  await assert.rejects(
+    service.listDirectory('project-1', { directoryPath: linkPath, offset: 0, limit: 500, respectGitignore: false }),
+    isOutsideProjectError,
+  );
+  assert.deepEqual(readDirectories, []);
+});
+
+test('listDirectory reports a file as a client error', async () => {
+  const projectRoot = path.resolve('file-tree-test-project');
+  const { fileSystem } = createFakeProjectFileSystem(projectRoot, sampleLayout);
+  const service = createFileTreeService(createDependencies(fileSystem, projectRoot));
+
+  await assert.rejects(
+    service.listDirectory('project-1', {
+      directoryPath: path.join(projectRoot, 'README.md'), offset: 0, limit: 500, respectGitignore: false,
+    }),
+    (error: unknown) => error instanceof AppError && error.code === 'NOT_A_DIRECTORY' && error.statusCode === 400,
+  );
+});
+
+test('a project at a drive or filesystem root lists its root and its folders', async () => {
+  const filesystemRoot = path.parse(process.cwd()).root;
+  const { fileSystem } = createFakeProjectFileSystem(filesystemRoot, { '': [['docs', true]], docs: [['a.md', false]] });
+  const service = createFileTreeService(createDependencies(fileSystem, filesystemRoot));
+
+  const rootListing = await service.listDirectory('project-1', {
+    directoryPath: null, offset: 0, limit: 500, respectGitignore: false,
+  });
+  assert.deepEqual(rootListing.entries.map((entry) => entry.path), [path.join(filesystemRoot, 'docs')]);
+  const docsListing = await service.listDirectory('project-1', {
+    directoryPath: path.join(filesystemRoot, 'docs'), offset: 0, limit: 500, respectGitignore: false,
+  });
+  assert.deepEqual(docsListing.entries.map((entry) => entry.name), ['a.md']);
+});
+
+test('listDirectory accepts a lower-case drive letter on Windows', async (t) => {
+  if (process.platform !== 'win32') {
+    t.skip('drive letters only exist on Windows');
+    return;
+  }
+  const projectRoot = path.resolve('file-tree-test-project');
+  const lowerCaseSource = path.join(projectRoot[0].toLowerCase() + projectRoot.slice(1), 'src');
+  const { fileSystem } = createFakeProjectFileSystem(projectRoot, sampleLayout, {
+    stat: async () => createStats(true, 0o755),
+    openDirectory: createDirectoryReader((directoryPath) => directoryPath.toLowerCase() === lowerCaseSource.toLowerCase()
+      ? [createDirectoryEntry('main.ts', false)]
+      : []),
+  });
+  const service = createFileTreeService(createDependencies(fileSystem, projectRoot));
+
+  const listing = await service.listDirectory('project-1', {
+    directoryPath: lowerCaseSource, offset: 0, limit: 500, respectGitignore: false,
+  });
+  assert.equal(listing.path, lowerCaseSource);
+  assert.deepEqual(listing.entries.map((entry) => entry.name), ['main.ts']);
+});
+
+test('listDirectory never lists through a real symlink or junction out of the project', async () => {
+  const projectRoot = await fsPromises.mkdtemp(path.join(testDirectory, 'file-tree-project-'));
+  const outsideDirectory = await fsPromises.mkdtemp(path.join(testDirectory, 'file-tree-outside-'));
+
+  try {
+    await fsPromises.writeFile(path.join(outsideDirectory, 'secret.txt'), 'secret', 'utf8');
+    await fsPromises.mkdir(path.join(projectRoot, 'inside'));
+    // `junction` is what Windows creates without developer mode; elsewhere it is ignored.
+    await fsPromises.symlink(outsideDirectory, path.join(projectRoot, 'escape'), 'junction');
+
+    const service = createRealFileSystemService(projectRoot);
+    const rootListing = await service.listDirectory('project-1', {
+      directoryPath: null, offset: 0, limit: 500, respectGitignore: false,
+    });
+    // The link is shown, as before, but as a non-expandable entry.
+    const escapeEntry = rootListing.entries.find((entry) => entry.name === 'escape');
+    assert.equal(escapeEntry?.type, 'file');
+    assert.equal(escapeEntry?.isSymlink, true);
+
+    await assert.rejects(
+      service.listDirectory('project-1', {
+        directoryPath: path.join(projectRoot, 'escape'), offset: 0, limit: 500, respectGitignore: false,
+      }),
+      isOutsideProjectError,
+    );
+
+    const search = await service.searchProjectFiles('project-1', {
+      query: 'secret', match: 'path', filesOnly: false, limit: 100, respectGitignore: false,
+    });
+    assert.deepEqual(search.results, []);
+  } finally {
+    await fsPromises.rm(projectRoot, { recursive: true, force: true });
+    await fsPromises.rm(outsideDirectory, { recursive: true, force: true });
+  }
+});
+
+test('searchProjectFiles returns matches in tree order with project-relative paths', async () => {
+  const projectRoot = path.resolve('file-tree-test-project');
+  const { fileSystem } = createFakeProjectFileSystem(projectRoot, sampleLayout);
+  const service = createFileTreeService(createDependencies(fileSystem, projectRoot));
+
+  const byPath = await service.searchProjectFiles('project-1', {
+    query: 'LOGO', match: 'path', filesOnly: true, limit: 100, respectGitignore: true,
+  });
+  // `build/` is a fallback-ignored folder and `node_modules/` a hard exclusion.
+  assert.deepEqual(byPath.results.map((result) => result.relativePath), [
+    'assets/logo-128.png',
+    'src/lib/logo.ts',
+    'src/logo-helper.ts',
+  ]);
+  assert.equal(byPath.truncated, false);
+  assert.equal(byPath.results[0]?.path, path.join(projectRoot, 'assets', 'logo-128.png'));
+  assert.equal(byPath.results[0]?.permissions, '644');
+
+  const folders = await service.searchProjectFiles('project-1', {
+    query: 'li', match: 'name', filesOnly: false, limit: 100, respectGitignore: true,
+  });
+  assert.deepEqual(folders.results.map((result) => [result.relativePath, result.type]), [['src/lib', 'directory']]);
+
+  const exact = await service.searchProjectFiles('project-1', {
+    query: 'logo.ts', match: 'basename', filesOnly: true, limit: 100, respectGitignore: true,
+  });
+  assert.deepEqual(exact.results.map((result) => result.relativePath), ['src/lib/logo.ts']);
+});
+
+test('searchProjectFiles with an empty query lists the first files and reports truncation', async () => {
+  const projectRoot = path.resolve('file-tree-test-project');
+  const { fileSystem } = createFakeProjectFileSystem(projectRoot, sampleLayout);
+  const service = createFileTreeService(createDependencies(fileSystem, projectRoot));
+
+  const firstTwo = await service.searchProjectFiles('project-1', {
+    query: '', match: 'path', filesOnly: true, limit: 2, respectGitignore: true,
+  });
+  assert.deepEqual(firstTwo.results.map((result) => result.relativePath), ['assets/banner.png', 'assets/logo-128.png']);
+  assert.equal(firstTwo.truncated, true);
+
+  const everything = await service.searchProjectFiles('project-1', {
+    query: '', match: 'path', filesOnly: true, limit: 100, respectGitignore: true,
+  });
+  assert.equal(everything.results.length, 6);
+  assert.equal(everything.truncated, false);
+});
+
+test('searchProjectFiles honours the project gitignore when asked', async () => {
+  const projectRoot = path.resolve('file-tree-test-project');
+  const { fileSystem } = createFakeProjectFileSystem(projectRoot, sampleLayout, {
+    readTextFile: async () => 'assets/\n',
+  });
+  const service = createFileTreeService(createDependencies(fileSystem, projectRoot));
+
+  const result = await service.searchProjectFiles('project-1', {
+    query: 'logo', match: 'path', filesOnly: true, limit: 100, respectGitignore: true,
+  });
+  // `assets/` is ignored now, and `build/` is no longer excluded by name.
+  assert.deepEqual(result.results.map((entry) => entry.relativePath), [
+    'build/logo-built.png',
+    'src/lib/logo.ts',
+    'src/logo-helper.ts',
+  ]);
+});
+
+test('searchProjectFiles stops when its signal is aborted', async () => {
+  const projectRoot = path.resolve('file-tree-test-project');
+  const { fileSystem } = createFakeProjectFileSystem(projectRoot, sampleLayout);
+  const service = createFileTreeService(createDependencies(fileSystem, projectRoot));
+  const abortController = new AbortController();
+  abortController.abort();
+
+  await assert.rejects(
+    service.searchProjectFiles('project-1', {
+      query: 'logo', match: 'path', filesOnly: true, limit: 100, respectGitignore: true, signal: abortController.signal,
+    }),
+    (error: unknown) => error instanceof AppError && error.code === 'FILE_TREE_SEARCH_ABORTED',
+  );
+});
+
+test('a search that stops early leaves only a few subfolder reads behind', async () => {
+  const projectRoot = path.resolve('file-tree-test-project');
+  const layout: Record<string, Array<[string, boolean]>> = {
+    '': Array.from({ length: 1_000 }, (_, index): [string, boolean] => [`folder-${String(index).padStart(4, '0')}`, true]),
+  };
+  for (let index = 0; index < 1_000; index += 1) {
+    layout[`folder-${String(index).padStart(4, '0')}`] = [['match.txt', false]];
+  }
+  const { fileSystem, readDirectories } = createFakeProjectFileSystem(projectRoot, layout);
+  const service = createFileTreeService(createDependencies(fileSystem, projectRoot));
+
+  const result = await service.searchProjectFiles('project-1', {
+    query: 'match', match: 'name', filesOnly: true, limit: 2, respectGitignore: false,
+  });
+  assert.deepEqual(result.results.map((entry) => entry.relativePath), [
+    'folder-0000/match.txt',
+    'folder-0001/match.txt',
+  ]);
+  assert.equal(result.truncated, true);
+  // Let any read-ahead still queued finish before counting.
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.ok(readDirectories.length < 40, `read ${readDirectories.length} directories`);
+});

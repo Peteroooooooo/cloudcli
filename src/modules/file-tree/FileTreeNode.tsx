@@ -3,9 +3,10 @@ import { useTranslation } from 'react-i18next';
 import { ChevronRight, Folder, FolderOpen, Upload } from 'lucide-react';
 
 import { cn } from '@/shared/utils';
-import type { FileTreeNode as FileTreeNodeType, FileTreeViewMode } from '@/shared/types';
+import type { FileTreeDirectoryStatus, FileTreeNode as FileTreeNodeType, FileTreeViewMode } from '@/shared/types';
 import { Input } from '@/shared/ui';
 import FileContextMenu from '@/modules/file-tree/FileContextMenu';
+import FileTreeDirectoryStatusRows from '@/modules/file-tree/FileTreeDirectoryStatusRows';
 
 type FileTreeNodeProps = {
   item: FileTreeNodeType;
@@ -35,6 +36,9 @@ type FileTreeNodeProps = {
   handleCancelRename?: () => void;
   renameInputRef?: RefObject<HTMLInputElement>;
   operationLoading?: boolean;
+  // On-demand loading: absent for search results, which arrive complete.
+  getDirectoryStatus?: (directoryPath: string) => FileTreeDirectoryStatus;
+  onLoadMore?: (directoryPath: string) => void;
 };
 
 type TreeItemIconProps = {
@@ -99,11 +103,16 @@ export default function FileTreeNode({
   handleCancelRename,
   renameInputRef,
   operationLoading,
+  getDirectoryStatus,
+  onLoadMore,
 }: FileTreeNodeProps) {
   const { t } = useTranslation();
   const isDirectory = item.type === 'directory';
   const isOpen = isDirectory && expandedDirs.has(item.path);
   const hasChildren = Boolean(isDirectory && item.children && item.children.length > 0);
+  const directoryStatus = isOpen && getDirectoryStatus ? getDirectoryStatus(item.path) : null;
+  const hasStatusRow = Boolean(directoryStatus
+    && (directoryStatus.error || (!directoryStatus.loaded && directoryStatus.loading) || directoryStatus.remaining > 0));
   const isRenaming = renamingItem?.path === item.path;
   const dragTargetPath = isDirectory ? item.path : getParentDirectoryPath(item.path);
   const isDropTarget = isDirectory && dropTarget === item.path;
@@ -243,7 +252,7 @@ export default function FileTreeNode({
         rowContent
       )}
 
-      {isDirectory && isOpen && hasChildren && (
+      {isDirectory && isOpen && (hasChildren || hasStatusRow) && (
         <div className="relative">
           <span
             className="absolute bottom-0 top-0 border-l border-border/40"
@@ -278,8 +287,18 @@ export default function FileTreeNode({
               handleCancelRename={handleCancelRename}
               renameInputRef={renameInputRef}
               operationLoading={operationLoading}
+              getDirectoryStatus={getDirectoryStatus}
+              onLoadMore={onLoadMore}
             />
           ))}
+          {directoryStatus && (
+            <FileTreeDirectoryStatusRows
+              directoryPath={item.path}
+              status={directoryStatus}
+              level={level + 1}
+              onLoadMore={onLoadMore}
+            />
+          )}
         </div>
       )}
     </div>

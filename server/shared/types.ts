@@ -1358,6 +1358,63 @@ export type FileTreeNode = {
 };
 
 /**
+ * One page of a single directory's direct children, returned by the File Tree
+ * on-demand listing.
+ *
+ * `entries` never carry `children`; the browser asks for each folder when it
+ * is expanded. Entries are sorted folders first, then by name, and paged with
+ * `offset`/`limit` so a folder with tens of thousands of children is never
+ * sent in one response. `total` counts the visible entries that were scanned;
+ * `truncated` means the scan stopped at the server's per-directory cap, so
+ * `total` is a lower bound.
+ */
+export type FileTreeDirectoryListing = {
+  path: string;
+  entries: FileTreeNode[];
+  total: number;
+  offset: number;
+  hasMore: boolean;
+  truncated: boolean;
+};
+
+/**
+ * Parsed input for a bounded project-wide name/path search.
+ *
+ * `query` is matched case-insensitively as a substring of the entry name
+ * (`name`), of its project-relative path with `/` separators (`path`), or as
+ * the whole name (`basename`). An empty query matches every entry, which lets
+ * callers ask for "the first N files" in tree order. `signal` aborts the walk
+ * when the HTTP client goes away.
+ */
+export type FileTreeSearchInput = {
+  query: string;
+  match: 'name' | 'path' | 'basename';
+  filesOnly: boolean;
+  limit: number;
+  respectGitignore: boolean;
+  signal?: AbortSignal;
+};
+
+/**
+ * One search hit: a File Tree node without children plus its project-relative
+ * path with `/` separators, which chat mentions insert verbatim.
+ */
+export type FileTreeSearchResult = Omit<FileTreeNode, 'children'> & {
+  relativePath: string;
+};
+
+/**
+ * Bounded search outcome. Results are in the same order a fully expanded tree
+ * shows them (depth first, folders before files, then by name). `truncated` is
+ * true when the result cap, the walk's entry budget, or its time budget ended
+ * the walk before every entry was checked, so more matches may exist.
+ */
+export type FileTreeSearchResponse = {
+  results: FileTreeSearchResult[];
+  truncated: boolean;
+};
+
+/**
  * Minimal directory-entry shape required during File Tree traversal.
  *
  * Production adapts Node `Dirent` objects to this structural contract. Tests
@@ -1500,6 +1557,14 @@ export type FileTreeServices = {
     projectId: string,
     options?: { respectGitignore: boolean },
   ): Promise<FileTreeNode[]>;
+  listDirectory(projectId: string, input: {
+    // Absolute or project-relative; null/empty lists the project root.
+    directoryPath: string | null;
+    offset: number;
+    limit: number;
+    respectGitignore: boolean;
+  }): Promise<FileTreeDirectoryListing>;
+  searchProjectFiles(projectId: string, input: FileTreeSearchInput): Promise<FileTreeSearchResponse>;
   createEntry(input: {
     projectId: string;
     parentPath: string;
