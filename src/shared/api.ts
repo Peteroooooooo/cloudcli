@@ -288,6 +288,10 @@ export const api = {
   sessionDetails: (sessionId: string) =>
     get(`/api/providers/sessions/${encodeURIComponent(sessionId)}`),
   runningSessions: () => get('/api/providers/sessions/running'),
+  // Closes a session in CloudCLI (the × in the sidebar's open list). Only the
+  // open mark goes: a running turn keeps going and nothing is deleted.
+  closeSessionInCloudCli: (sessionId: string) =>
+    del(`/api/providers/sessions/${encodeURIComponent(sessionId)}/cloudcli-open`),
   recentConversations: (
     { limit = 40, offset = 0, provider = 'all' }: { limit?: number; offset?: number; provider?: SessionProviderFilter } = {},
   ) =>

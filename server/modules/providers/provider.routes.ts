@@ -890,6 +890,8 @@ router.post(
     const projectPath = typeof body.projectPath === 'string' ? body.projectPath : '';
     const initialMessage = typeof body.initialMessage === 'string' ? body.initialMessage : '';
     const result = sessionsService.createAppSession(provider, projectPath, initialMessage);
+    // Only CloudCLI's chat creates sessions here, so the new one is open in it.
+    sessionsService.markSessionOpenInCloudCli(result.sessionId);
     res.status(201).json(createApiSuccessResponse(result));
   }),
 );
@@ -897,8 +899,8 @@ router.post(
 router.get(
   '/sessions/running',
   asyncHandler(async (_req: Request, res: Response) => {
-    const { sessions, openElsewhere } = await sessionsService.getRunningSessionsSnapshot();
-    res.json(createApiSuccessResponse({ sessions, openElsewhere }));
+    const { sessions, openElsewhere, openInCloudCli } = await sessionsService.getRunningSessionsSnapshot();
+    res.json(createApiSuccessResponse({ sessions, openElsewhere, openInCloudCli }));
   }),
 );
 
@@ -991,6 +993,19 @@ router.post(
     const sessionId = parseSessionId(req.params.sessionId);
     const result = sessionsService.restoreSessionById(sessionId);
     res.json(createApiSuccessResponse(result));
+  }),
+);
+
+/**
+ * Closes a session in CloudCLI, the sidebar's × on an open session:
+ * `{ success: true, data: { sessionId, closed } }`. Only the open mark is
+ * removed; a running turn and the session itself are left alone.
+ */
+router.delete(
+  '/sessions/:sessionId/cloudcli-open',
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = parseSessionId(req.params.sessionId);
+    res.json(createApiSuccessResponse(sessionsService.closeSessionInCloudCli(sessionId)));
   }),
 );
 

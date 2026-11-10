@@ -9,6 +9,9 @@ export {
   broadcastSessionUpserted,
   broadcastSessionUpsertedBatch,
 } from './services/session-upsert-broadcast.service.js';
+// broadcastOpenSessionsChanged: used by the providers module's sessions service
+// when a session is marked open in CloudCLI or closed there.
+export { broadcastOpenSessionsChanged } from './services/session-upsert-broadcast.service.js';
 // runDetachedChatTurn: used by the scheduled-messages module to run a turn
 // from the server, with no socket that asked for it.
 export { runDetachedChatTurn } from './services/chat-websocket.service.js';

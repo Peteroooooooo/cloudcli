@@ -54,6 +54,8 @@ type SidebarProjectItemProps = {
   onToggleSessionSelected: (projectId: string, sessionId: string) => void;
   onCancelSessionSelection: () => void;
   onDeleteSelectedSessions: (sessionIds: string[]) => void;
+  /** Closes a session in CloudCLI; given only while the sidebar shows the open list. */
+  onCloseOpenSession?: (sessionId: string) => void;
   t: TFunction;
 };
 
@@ -104,6 +106,7 @@ function SidebarProjectItem({
   onToggleSessionSelected,
   onCancelSessionSelection,
   onDeleteSelectedSessions,
+  onCloseOpenSession,
   t,
 }: SidebarProjectItemProps) {
   // Project identity is tracked by the DB-assigned `projectId` everywhere
@@ -468,6 +471,7 @@ function SidebarProjectItem({
         onToggleSessionSelected={onToggleSessionSelected}
         onCancelSessionSelection={onCancelSessionSelection}
         onDeleteSelectedSessions={onDeleteSelectedSessions}
+        onCloseOpenSession={onCloseOpenSession}
         t={t}
       />
     </div>

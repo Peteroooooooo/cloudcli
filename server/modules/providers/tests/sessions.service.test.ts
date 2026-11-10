@@ -495,6 +495,7 @@ test('a VS Code turn counts from when it began and says where it runs', { concur
               openIn: 'vscode',
             }],
             openElsewhere: [{ sessionId: 'vscode-session', openIn: 'vscode', busy: true }],
+            openInCloudCli: [],
           });
         },
       ),
@@ -515,6 +516,7 @@ test('a session open but idle in VS Code is reported as open, not as running', {
           assert.deepEqual(await sessionsService.getRunningSessionsSnapshot(), {
             sessions: [],
             openElsewhere: [{ sessionId: 'open-session', openIn: 'vscode', busy: false }],
+            openInCloudCli: [],
           });
         },
       ),
@@ -532,7 +534,7 @@ test("CloudCLI's own Claude processes are not reported as open elsewhere", { con
       async () => await withProviders(
         { claude: { run: async () => undefined, abort: () => false } },
         async () => {
-          assert.deepEqual(await sessionsService.getRunningSessionsSnapshot(), { sessions: [], openElsewhere: [] });
+          assert.deepEqual(await sessionsService.getRunningSessionsSnapshot(), { sessions: [], openElsewhere: [], openInCloudCli: [] });
         },
       ),
     );

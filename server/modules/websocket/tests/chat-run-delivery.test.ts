@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
+import { sessionsService } from '@/modules/providers/index.js';
 import { handleChatConnection, runDetachedChatTurn } from '@/modules/websocket/services/chat-websocket.service.js';
 import { chatRunRegistry } from '@/modules/websocket/services/chat-run-registry.service.js';
 import { connectedClients } from '@/modules/websocket/services/websocket-state.service.js';
@@ -302,5 +303,31 @@ test('events and the subscribe ack carry the run id that scopes their seq', asyn
     subscribe(stale, [{ sessionId: SESSION_ID, lastSeq: 2, runId: 'an-earlier-run' }]);
     await settle();
     assert.deepEqual(framesOfKind(stale, 'text').map((frame) => frame.content), ['one', 'two', 'three']);
+  });
+});
+
+test('a message sent from CloudCLI opens the session there and tells every client once', async () => {
+  await withIsolatedDatabase(async () => {
+    const runtime = createRuntime({
+      run: async (_options, writer) => {
+        writer.send({ kind: 'complete', provider: 'claude', sessionId: 'native-1', exitCode: 0 });
+      },
+    });
+    const sender = createFakeSocket();
+    const otherDevice = createFakeSocket();
+    connect(sender, runtime);
+    connect(otherDevice, runtime);
+
+    sender.emit('message', JSON.stringify({ type: 'chat.send', sessionId: SESSION_ID, content: 'reply with ok' }));
+    await settle();
+    sender.emit('message', JSON.stringify({ type: 'chat.send', sessionId: SESSION_ID, content: 'again' }));
+    await settle();
+
+    assert.deepEqual(sessionsService.listSessionsOpenInCloudCli().map((entry) => entry.sessionId), [SESSION_ID]);
+    // The turn has ended; the session is still open, and the second send was
+    // not news to anyone.
+    assert.equal(chatRunRegistry.isProcessing(SESSION_ID), false);
+    assert.equal(framesOfKind(otherDevice, 'open_sessions_changed').length, 1);
+    assert.equal(framesOfKind(sender, 'open_sessions_changed').length, 1);
   });
 });

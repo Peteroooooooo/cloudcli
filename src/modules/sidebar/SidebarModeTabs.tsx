@@ -40,7 +40,7 @@ export default function SidebarModeTabs({
   const tabs: ModeTab[] = [
     { mode: 'projects', label: t('search.modeProjects'), icon: Folder, showLabel: true },
     { mode: 'conversations', label: t('search.modeConversations'), icon: MessageSquare, showLabel: true },
-    { mode: 'running', label: t('search.runningTooltip', 'Open in VS Code or a terminal'), icon: Terminal, showLabel: false },
+    { mode: 'running', label: t('search.runningTooltip', 'Open in VS Code, a terminal or CloudCLI'), icon: Terminal, showLabel: false },
   ];
 
   const activeIndex = tabs.findIndex((tab) => tab.mode === searchMode);

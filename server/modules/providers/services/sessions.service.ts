@@ -1,8 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
-import { projectsDb, sessionsDb } from '@/modules/database/index.js';
-import { broadcastSessionsRemoved, broadcastSessionUpserted, chatRunRegistry } from '@/modules/websocket/index.js';
+import { cloudCliOpenSessionsDb, projectsDb, sessionsDb } from '@/modules/database/index.js';
+import {
+  broadcastOpenSessionsChanged,
+  broadcastSessionsRemoved,
+  broadcastSessionUpserted,
+  chatRunRegistry,
+} from '@/modules/websocket/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import { listLiveClaudeProcesses } from '@/modules/providers/services/claude-cli-liveness.service.js';
 import type { ClaudeProcessHost } from '@/modules/providers/services/claude-cli-liveness.service.js';
@@ -106,10 +111,22 @@ type OpenElsewhereEntry = {
   busy: boolean;
 };
 
+/** A session the user has open in CloudCLI: created or sent to from here, and not closed since. */
+type OpenInCloudCliEntry = {
+  sessionId: string;
+};
+
 type RunningSessionsSnapshot = {
   sessions: RunningSessionEntry[];
   openElsewhere: OpenElsewhereEntry[];
+  openInCloudCli: OpenInCloudCliEntry[];
 };
+
+/**
+ * How long a session stays open in CloudCLI with no activity in it, from any
+ * program, before it drops out of the list on its own.
+ */
+const CLOUDCLI_OPEN_IDLE_LIMIT_MS = 24 * 60 * 60 * 1000;
 
 const RUNNING_ELSEWHERE_STATUS: Record<ClaudeProcessHost, string> = {
   vscode: 'Running in VS Code',
@@ -229,15 +246,16 @@ export const sessionsService = {
 
   /**
    * The running-sessions poll's whole payload: the busy sessions of
-   * `listRunningSessions`, plus every session some other Claude process has
-   * open right now, busy or idle.
+   * `listRunningSessions`, every session some other Claude process has open
+   * right now, busy or idle, and every session the user has open in CloudCLI
+   * itself (`openInCloudCli`). A session can be in both open lists.
    *
    * `openElsewhere` exists because a turn sent from CloudCLI resumes the
    * session in a process of its own; the VS Code panel or terminal that also
    * has it open never sees that turn, and its next message branches the
    * transcript. Both lists come from one read of the process registry.
    */
-  async getRunningSessionsSnapshot(): Promise<RunningSessionsSnapshot> {
+  async getRunningSessionsSnapshot(now = Date.now()): Promise<RunningSessionsSnapshot> {
     const entries: RunningSessionEntry[] = chatRunRegistry.listRunningRuns();
     const runningById = new Map(entries.map((entry) => [entry.sessionId, entry]));
 
@@ -298,7 +316,60 @@ export const sessionsService = {
       runningById.set(session.session_id, entries[entries.length - 1]);
     }
 
-    return { sessions: entries, openElsewhere: [...openElsewhereById.values()] };
+    return {
+      sessions: entries,
+      openElsewhere: [...openElsewhereById.values()],
+      openInCloudCli: sessionsService.listSessionsOpenInCloudCli(now),
+    };
+  },
+
+  /**
+   * Sessions the user has open in CloudCLI, the way a VS Code tab holds one:
+   * created or sent to from CloudCLI's chat and not closed since. A session
+   * with no activity for a day, counted from its last message or the last
+   * send from here, whichever is later, is closed on the way.
+   */
+  listSessionsOpenInCloudCli(now = Date.now()): OpenInCloudCliEntry[] {
+    const activeSince = new Date(now - CLOUDCLI_OPEN_IDLE_LIMIT_MS).toISOString();
+    return cloudCliOpenSessionsDb.listOpenSessionIds(activeSince).map((sessionId) => ({ sessionId }));
+  },
+
+  /**
+   * Marks a session open in CloudCLI because the user created it or sent to
+   * it from here. Used by the chat gateway on every send and by the session
+   * creation route; viewing a session never marks it. Every client hears of a
+   * newly open session at once, not at its next poll. Ids without a session
+   * row are ignored. Never throws: the mark is bookkeeping, and a send must
+   * not fail over it.
+   */
+  markSessionOpenInCloudCli(sessionId: string, now = Date.now()): void {
+    try {
+      if (!sessionsDb.getSessionById(sessionId)) {
+        return;
+      }
+      if (cloudCliOpenSessionsDb.markOpen(sessionId, new Date(now).toISOString())) {
+        broadcastOpenSessionsChanged();
+      }
+    } catch (error) {
+      console.error('Could not mark the session open in CloudCLI', {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  },
+
+  /**
+   * Closes a session in CloudCLI: it leaves the open list unless another
+   * program still has it open. Only the mark goes; a turn in progress keeps
+   * running and nothing is deleted. Closing a session that is not open is a
+   * no-op, reported as `closed: false`.
+   */
+  closeSessionInCloudCli(sessionId: string): { sessionId: string; closed: boolean } {
+    const closed = cloudCliOpenSessionsDb.close(sessionId);
+    if (closed) {
+      broadcastOpenSessionsChanged();
+    }
+    return { sessionId, closed };
   },
 
   /**
@@ -804,6 +875,8 @@ export const sessionsService = {
 
     if (!options.force) {
       sessionsDb.updateSessionIsArchived(sessionId, true);
+      // An archived session is out of every active list, the open one included.
+      sessionsService.closeSessionInCloudCli(sessionId);
       return {
         sessionId,
         action: 'archived',
@@ -828,6 +901,7 @@ export const sessionsService = {
     // The row is gone before the watcher sees the transcript go, so its removal
     // check finds nothing to report; the other open clients learn of it here.
     broadcastSessionsRemoved([sessionId], []);
+    sessionsService.closeSessionInCloudCli(sessionId);
 
     return {
       sessionId,

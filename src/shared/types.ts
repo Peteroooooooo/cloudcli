@@ -1755,6 +1755,12 @@ export type SidebarProjectListProps = SessionRowActions & {
   onCancelSessionSelection: () => void;
   /** Opens the bulk delete confirmation for the ids the list resolved as still deletable. */
   onDeleteSelectedSessions: (sessionIds: string[]) => void;
+  /**
+   * Closes a session in CloudCLI (the × on a row of the open list). Given only
+   * while the sidebar shows that list; each project's rows decide which of
+   * their sessions it applies to.
+   */
+  onCloseOpenSession?: (sessionId: string) => void;
   t: TFunction;
 };
 

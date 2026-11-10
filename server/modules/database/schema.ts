@@ -257,6 +257,31 @@ CREATE TABLE IF NOT EXISTS superseded_provider_sessions (
 );
 `;
 
+/**
+ * Sessions the user has open in CloudCLI, the way a VS Code tab holds one.
+ *
+ * A row is written when the user creates a session from CloudCLI's chat or
+ * sends to one from it, and removed when they close it from the sidebar's open
+ * list, when the session is deleted or archived, or once a day passes with no
+ * activity in it. It lives here, not in the browser, so every device signed in
+ * sees the same list and it survives a restart. Keyed by the app session id
+ * alone: sessions are not owned per user either.
+ *
+ * Deliberately no foreign key to `sessions`: that table is rebuilt by legacy
+ * migrations (rename, copy, drop), which would carry a reference along to the
+ * dropped copy. Rows whose session is gone are pruned when the list is read.
+ */
+export const CLOUDCLI_OPEN_SESSIONS_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS cloudcli_open_sessions (
+    session_id TEXT NOT NULL PRIMARY KEY,
+    -- When the user last created or sent to the session from CloudCLI. The
+    -- day without activity is counted from this or the session's own last
+    -- activity, whichever is later, so a send whose turn wrote nothing yet
+    -- still keeps the session open.
+    opened_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`;
+
 export const INIT_SCHEMA_SQL = `
 -- Initialize authentication database
 PRAGMA foreign_keys = ON;
@@ -310,4 +335,6 @@ ${USER_PREFERENCES_TABLE_SCHEMA_SQL}
 ${SESSION_DRAFTS_TABLE_SCHEMA_SQL}
 
 ${SUPERSEDED_PROVIDER_SESSIONS_TABLE_SCHEMA_SQL}
+
+${CLOUDCLI_OPEN_SESSIONS_TABLE_SCHEMA_SQL}
 `;

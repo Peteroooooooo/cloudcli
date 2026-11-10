@@ -13,9 +13,13 @@ test('a host CLAUDE_CODE_ARTIFACT value wins over the default', () => {
   assert.equal(buildClaudeSdkEnv({ CLAUDE_CODE_ARTIFACT: '0' }).CLAUDE_CODE_ARTIFACT, '0');
 });
 
-test('SDK sessions are labeled claudecodeui, and a host value wins', () => {
+// The process registry records this entrypoint, and the running-sessions poll
+// leaves out CloudCLI's own turns by it. A server started from a VS Code
+// terminal inherits `claude-vscode`, which made its own turns look open in VS
+// Code for as long as each process lived.
+test('SDK sessions are always labeled claudecodeui, whatever the host inherited', () => {
   assert.equal(buildClaudeSdkEnv({}).CLAUDE_CODE_ENTRYPOINT, 'claudecodeui');
-  assert.equal(buildClaudeSdkEnv({ CLAUDE_CODE_ENTRYPOINT: 'x' }).CLAUDE_CODE_ENTRYPOINT, 'x');
+  assert.equal(buildClaudeSdkEnv({ CLAUDE_CODE_ENTRYPOINT: 'claude-vscode' }).CLAUDE_CODE_ENTRYPOINT, 'claudecodeui');
 });
 
 test('host env vars are still forwarded', () => {

@@ -686,3 +686,31 @@ test('conversation search keeps to the requested provider and refuses an unknown
     assert.equal(invalidPayload.error.code, 'INVALID_PROVIDER_FILTER');
   });
 });
+
+test('a session created from CloudCLI is open there until its mark is closed', async () => {
+  await withProviderServer(async (baseUrl, workspacePath) => {
+    const created = await fetch(`${baseUrl}/api/providers/sessions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'claude', projectPath: workspacePath, initialMessage: 'reply with ok' }),
+    });
+    const { data: { sessionId } } = await created.json() as { data: { sessionId: string } };
+
+    const readOpen = async () => {
+      const response = await fetch(`${baseUrl}/api/providers/sessions/running`);
+      const payload = await response.json() as { data: { openInCloudCli: Array<{ sessionId: string }> } };
+      return payload.data.openInCloudCli;
+    };
+    assert.deepEqual(await readOpen(), [{ sessionId }]);
+
+    const closeUrl = `${baseUrl}/api/providers/sessions/${encodeURIComponent(sessionId)}/cloudcli-open`;
+    const closed = await fetch(closeUrl, { method: 'DELETE' });
+    assert.equal(closed.status, 200);
+    assert.deepEqual(await closed.json(), { success: true, data: { sessionId, closed: true } });
+    assert.deepEqual(await readOpen(), []);
+    assert.ok(sessionsDb.getSessionById(sessionId), 'closing leaves the session itself alone');
+
+    const closedAgain = await fetch(closeUrl, { method: 'DELETE' });
+    assert.deepEqual(await closedAgain.json(), { success: true, data: { sessionId, closed: false } });
+  });
+});

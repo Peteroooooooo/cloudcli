@@ -353,14 +353,20 @@ function matchesToolPermission(entry: string, toolName: string, input: unknown) 
  * CLAUDE_CODE_ARTIFACT is set, so a session continued from this UI would lose them.
  * Default it on; a host value (e.g. CLAUDE_CODE_ARTIFACT=0) still wins.
  *
+ * CLAUDE_CODE_ENTRYPOINT is always CloudCLI's own, even when the host has one:
+ * it is what the CLI writes into its process registry, and the running-sessions
+ * poll tells CloudCLI's turns from a VS Code panel's or a terminal's by it. A
+ * server started from a shell inside VS Code inherits `claude-vscode`, and its
+ * chat turns were then listed as open in VS Code until each process exited.
+ *
  * @param {NodeJS.ProcessEnv} [hostEnv] - Environment to forward, `process.env` by default
  * @returns {NodeJS.ProcessEnv} Environment for the spawned CLI
  */
 export function buildClaudeSdkEnv(hostEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   return {
     CLAUDE_CODE_ARTIFACT: '1',
-    CLAUDE_CODE_ENTRYPOINT: 'claudecodeui',
     ...hostEnv,
+    CLAUDE_CODE_ENTRYPOINT: 'claudecodeui',
     CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: String(BG_WAIT_CEILING_MS),
   };
 }

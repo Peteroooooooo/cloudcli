@@ -121,3 +121,29 @@ export function broadcastSessionsRemoved(sessionIds: string[], projectIds: strin
 
 /** @internal Exported for the broadcast tests, which assert the payload shape directly. */
 export { buildSessionUpsertedEvent };
+
+/**
+ * Tells every client that the set of sessions open in CloudCLI changed: one
+ * was created or sent to from here for the first time, or closed. Carries no
+ * list on purpose; clients re-read the running-sessions route, which is the
+ * one place that decides what counts as open. Used by the providers module's
+ * sessions service, so a phone and a desktop show the change at once rather
+ * than at their next poll. A socket that throws is skipped: the callers are a
+ * send and a delete, which must not fail over a notification.
+ */
+export function broadcastOpenSessionsChanged(): void {
+  const payload = JSON.stringify({
+    kind: 'open_sessions_changed',
+    timestamp: new Date().toISOString(),
+  });
+  connectedClients.forEach((client) => {
+    if (client.readyState !== WS_OPEN_STATE) {
+      return;
+    }
+    try {
+      client.send(payload);
+    } catch {
+      // The socket went away mid-send; its close handler removes it.
+    }
+  });
+}

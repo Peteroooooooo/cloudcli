@@ -4,6 +4,7 @@ import type { TFunction } from 'i18next';
 import { Button } from '@/shared/ui';
 import { cn } from '@/shared/utils';
 import type { LLMProvider, Project, ProjectSession, SessionWithProvider, SidebarSessionSelection } from '@/shared/types';
+import { useOpenElsewhereSessions, useOpenInCloudCliSessionIds } from '@/shared/context/SessionProtectionContext';
 import SidebarSessionItem from '@/modules/sidebar/SidebarSessionItem';
 import { useCompactSidebar } from '@/modules/sidebar/hooks/useCompactSidebar';
 
@@ -38,6 +39,8 @@ type SidebarProjectSessionsProps = {
   onToggleSessionSelected: (projectId: string, sessionId: string) => void;
   onCancelSessionSelection: () => void;
   onDeleteSelectedSessions: (sessionIds: string[]) => void;
+  /** Closes a session in CloudCLI; given only while the sidebar shows the open list. */
+  onCloseOpenSession?: (sessionId: string) => void;
   t: TFunction;
 };
 
@@ -89,15 +92,23 @@ export default function SidebarProjectSessions({
   onToggleSessionSelected,
   onCancelSessionSelection,
   onDeleteSelectedSessions,
+  onCloseOpenSession,
   t,
 }: SidebarProjectSessionsProps) {
   const isCompact = useCompactSidebar();
+  const openElsewhereSessions = useOpenElsewhereSessions();
+  const openInCloudCliSessionIds = useOpenInCloudCliSessionIds();
 
   if (!isExpanded) {
     return null;
   }
 
   const hasSessions = sessions.length > 0;
+  // The × only shows where closing takes the row away: a session that VS Code
+  // or a terminal also holds stays listed for that, so it gets none. Handed
+  // to just those rows, so the others keep their memoized props.
+  const canCloseOpenSession = (sessionId: string) =>
+    Boolean(onCloseOpenSession) && openInCloudCliSessionIds.has(sessionId) && !openElsewhereSessions.has(sessionId);
   const isSelecting = selectedSessionIds !== null;
   // A session with a response in flight cannot be deleted — the same rule the
   // row's options menu applies — so it is not selectable either.
@@ -238,6 +249,7 @@ export default function SidebarProjectSessions({
               onSessionSelect={onSessionSelect}
               onDeleteSession={onDeleteSession}
               onForkSession={onForkSession}
+              onCloseOpenSession={canCloseOpenSession(session.id) ? onCloseOpenSession : undefined}
               isSelecting={isSelecting}
               isChecked={checkedSessionIds.has(session.id)}
               onToggleSessionSelected={onToggleSessionSelected}

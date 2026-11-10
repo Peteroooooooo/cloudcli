@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useDeviceSettings } from '@/shared/hooks/useDeviceSettings';
@@ -8,7 +8,13 @@ import { useSidebarController } from '@/modules/sidebar/hooks/useSidebarControll
 import { useProviderFilterOptions } from '@/modules/sidebar/hooks/useProviderFilterOptions';
 import { useTaskMaster, useTasksSettings } from '@/modules/task-master';
 import { usePaletteOps } from '@/modules/command-palette';
-import { useBackgroundSessionIdSet, useBusySessionIdSet, useOpenElsewhereSessions } from '@/shared/context/SessionProtectionContext';
+import {
+  useBackgroundSessionIdSet,
+  useBusySessionIdSet,
+  useOpenElsewhereSessions,
+  useOpenInCloudCliSessionIds,
+  useSessionProtectionActions,
+} from '@/shared/context/SessionProtectionContext';
 import { useWebSocket } from '@/shared/context/WebSocketContext';
 import type { LLMProvider, LoadingProgress, MCPServerStatus, Project, ProjectSession, SessionProviderFilter, SidebarProjectListProps } from '@/shared/types';
 import SidebarCollapsed from '@/modules/sidebar/SidebarCollapsed';
@@ -87,6 +93,17 @@ function Sidebar({
   const activeSessions = useBusySessionIdSet();
   const backgroundSessionIds = useBackgroundSessionIdSet();
   const openElsewhereSessions = useOpenElsewhereSessions();
+  const openInCloudCliSessionIds = useOpenInCloudCliSessionIds();
+  const { closeSessionInCloudCli } = useSessionProtectionActions();
+  // Open anywhere: in another Claude process or in CloudCLI. Both lists keep
+  // their identity across polls that change nothing, and so does this.
+  const openSessionIds = useMemo(
+    () => new Set([...openElsewhereSessions.keys(), ...openInCloudCliSessionIds]),
+    [openElsewhereSessions, openInCloudCliSessionIds],
+  );
+  const handleCloseOpenSession = useCallback((sessionId: string) => {
+    void closeSessionInCloudCli(sessionId);
+  }, [closeSessionInCloudCli]);
   const { subscribe } = useWebSocket();
   const [showStaleCleanup, setShowStaleCleanup] = useState(false);
   const { providerFilterOptions, refreshCountsSoon } = useProviderFilterOptions({
@@ -173,7 +190,7 @@ function Sidebar({
     selectedSession,
     activeSessions,
     backgroundSessionIds,
-    openElsewhereSessions,
+    openSessionIds,
     isLoading,
     isMobile,
     t,
@@ -258,6 +275,8 @@ function Sidebar({
     onToggleSessionSelected: toggleSessionSelected,
     onCancelSessionSelection: cancelSessionSelection,
     onDeleteSelectedSessions: showDeleteSelectedSessionsConfirmation,
+    // Only the open list (the `>_` tab) offers the ×.
+    onCloseOpenSession: searchMode === 'running' ? handleCloseOpenSession : undefined,
     t,
   };
 

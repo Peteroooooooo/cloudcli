@@ -139,7 +139,7 @@
     "matches_other": "{{count}} matches",
     "projectsScanned_one": "{{count}} project scanned",
     "projectsScanned_other": "{{count}} projects scanned",
-    "runningTooltip": "Open in VS Code or a terminal",
+    "runningTooltip": "Open in VS Code, a terminal or CloudCLI",
     "runningPlaceholder": "Search open sessions..."
   },
   "providerFilter": {
@@ -210,9 +210,10 @@
     }
   },
   "running": {
-    "title": "Open in VS Code or a terminal",
+    "title": "Open in VS Code, a terminal or CloudCLI",
     "emptyTitle": "Nothing open",
     "noMatchingSessions": "No open sessions match this search.",
-    "emptyDescription": "Claude sessions open in VS Code or a terminal appear here."
+    "emptyDescription": "Sessions open in VS Code, a terminal or CloudCLI appear here.",
+    "close": "Close"
   }
 }

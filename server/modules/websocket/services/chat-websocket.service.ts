@@ -266,6 +266,11 @@ async function dispatchRun(
   const clientOptions = (data.options ?? {}) as AnyRecord;
   const command = typeof data.content === 'string' ? data.content : '';
 
+  // A message sent from CloudCLI keeps the session in its open list, the way
+  // typing in a VS Code tab keeps that tab. A scheduled message counts too:
+  // the user wrote it here.
+  sessionsService.markSessionOpenInCloudCli(sessionId);
+
   // Record what this turn runs with so reopening the session later restores the
   // same model and reasoning effort, and so the resume path has a
   // session-scoped model answer to use.
@@ -496,6 +501,9 @@ async function handleChatSteer(
     );
     return;
   }
+
+  // Sent from here, so the session stays in CloudCLI's open list.
+  sessionsService.markSessionOpenInCloudCli(sessionId);
 
   // Tells the sender the message is on its way into the turn. From here it is
   // the run's: the echo when Claude reads it, or the run ending without it.

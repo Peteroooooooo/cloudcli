@@ -35,6 +35,11 @@ type SidebarSessionItemProps = {
   onDeleteSession: (sessionId: string, sessionTitle: string) => void;
   /** Branches this session into an independent one; absent when its provider cannot. */
   onForkSession?: (session: SessionWithProvider) => void;
+  /**
+   * Closes the session in CloudCLI, drawn as a small × on the row. Given only
+   * in the open list, and only for a session closing would take off it.
+   */
+  onCloseOpenSession?: (sessionId: string) => void;
   /** This project's list is in bulk-selection mode: the row acts as a checkbox and hides its options. */
   isSelecting: boolean;
   /** Ticked for the pending bulk delete. Resolved by the list, which never ticks a running row. */
@@ -63,6 +68,7 @@ function SidebarSessionItem({
   onSessionSelect,
   onDeleteSession,
   onForkSession,
+  onCloseOpenSession,
   isSelecting,
   isChecked,
   onToggleSessionSelected,
@@ -147,6 +153,18 @@ function SidebarSessionItem({
       onCancelEditingSession();
     }
   };
+
+  // Hidden while ticking rows or renaming, like the other row actions.
+  const showCloseOpen = Boolean(onCloseOpenSession) && !isSelecting && !isEditing;
+  const closeOpenLabel = t('running.close', 'Close');
+  const closeOpenSession = (event: { stopPropagation: () => void; preventDefault: () => void }) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onCloseOpenSession?.(session.id);
+  };
+  // On a touch screen the desktop row shows its × all the time, so the age or
+  // spinner under it steps aside instead of hiding only on hover.
+  const touchHidesUnderClose = showCloseOpen && '[@media(hover:none)_and_(pointer:coarse)]:opacity-0';
 
   const startMobileRename = () => {
     onStartEditingSession(project.projectId, session.id, sessionView.sessionName);
@@ -239,6 +257,18 @@ function SidebarSessionItem({
                 )}
               </div>
             </div>
+
+            {showCloseOpen && (
+              <button
+                type="button"
+                aria-label={closeOpenLabel}
+                title={closeOpenLabel}
+                className="flex h-8 w-7 flex-shrink-0 items-center justify-center rounded-lg text-muted-foreground opacity-70 transition-colors hover:bg-muted hover:opacity-100 active:scale-95"
+                onClick={closeOpenSession}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
 
             {!isSelecting && (
               <button
@@ -476,6 +506,7 @@ function SidebarSessionItem({
                     className={cn(
                       'ml-auto flex-shrink-0 transition-opacity duration-200',
                       isEditing ? 'opacity-0' : !isSelecting && 'group-hover:opacity-0',
+                      touchHidesUnderClose,
                     )}
                   >
                     <Tooltip content={t('tooltips.processingSessionIndicator', 'Processing session')} position="top">
@@ -489,6 +520,7 @@ function SidebarSessionItem({
                     className={cn(
                       'ml-auto flex-shrink-0 text-[11px] text-muted-foreground transition-opacity duration-200',
                       isEditing ? 'opacity-0' : !isSelecting && 'group-hover:opacity-0',
+                      touchHidesUnderClose,
                     )}
                   >
                     {compactSessionAge}
@@ -501,6 +533,18 @@ function SidebarSessionItem({
             </div>
           </div>
         </a>
+
+        {showCloseOpen && (
+          <button
+            type="button"
+            aria-label={closeOpenLabel}
+            title={closeOpenLabel}
+            className="touch:opacity-100 absolute right-10 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground opacity-0 transition-all duration-200 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+            onClick={closeOpenSession}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
 
         {!isSelecting && (
           <SessionOptions

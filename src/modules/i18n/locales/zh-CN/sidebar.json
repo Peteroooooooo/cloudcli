@@ -138,7 +138,7 @@
     "matches_other": "{{count}} 个匹配",
     "projectsScanned_one": "{{count}} 个项目已扫描",
     "projectsScanned_other": "{{count}} 个项目已扫描",
-    "runningTooltip": "在 VS Code 或终端中打开的会话",
+    "runningTooltip": "在 VS Code、终端或 CloudCLI 中打开的会话",
     "runningPlaceholder": "搜索已打开的会话..."
   },
   "providerFilter": {
@@ -200,9 +200,10 @@
     }
   },
   "running": {
-    "title": "在 VS Code 或终端中打开",
+    "title": "在 VS Code、终端或 CloudCLI 中打开",
     "emptyTitle": "没有打开的会话",
     "noMatchingSessions": "没有匹配的已打开会话。",
-    "emptyDescription": "在 VS Code 或终端里打开的 Claude 会话会显示在这里。"
+    "emptyDescription": "在 VS Code、终端或 CloudCLI 中打开的会话会显示在这里。",
+    "close": "关闭"
   }
 }

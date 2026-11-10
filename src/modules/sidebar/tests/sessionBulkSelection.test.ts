@@ -649,10 +649,11 @@ test('unavailable browser storage does not prevent opening projects', () => {
 });
 
 const PROJECTS_WITH_SESSIONS = [{ ...PROJECT, sessions: SESSIONS }];
-const OPEN_ELSEWHERE = new Map([['s2', { openIn: 'vscode', busy: false }], ['s3', { openIn: 'cli', busy: true }]]);
+// The sidebar merges both open lists (another Claude process, CloudCLI) into this one set.
+const OPEN_SESSIONS = new Set(['s2', 's3']);
 const BUSY_S1 = new Set(['s1']);
 
-test('the open view lists the sessions open in VS Code or a terminal, not the busy ones', () => {
+test('the open view lists the sessions open in VS Code, a terminal or CloudCLI, not the busy ones', () => {
   const { result } = renderHook(() =>
     useSidebarController({
       projects: PROJECTS_WITH_SESSIONS,
@@ -660,7 +661,7 @@ test('the open view lists the sessions open in VS Code or a terminal, not the bu
       selectedSession: null,
       activeSessions: BUSY_S1,
       backgroundSessionIds: NO_IDS,
-      openElsewhereSessions: OPEN_ELSEWHERE,
+      openSessionIds: OPEN_SESSIONS,
       isLoading: false,
       isMobile: false,
       t,

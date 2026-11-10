@@ -350,7 +350,7 @@ export default function SidebarContent({
               <p className="text-sm text-muted-foreground">
                 {runningSessionsCount > 0
                   ? t('running.noMatchingSessions', 'No open sessions match this search.')
-                  : t('running.emptyDescription', 'Claude sessions open in VS Code or a terminal appear here.')}
+                  : t('running.emptyDescription', 'Sessions open in VS Code, a terminal or CloudCLI appear here.')}
               </p>
             </div>
           ) : (
@@ -361,7 +361,7 @@ export default function SidebarContent({
                     <Terminal className="h-3.5 w-3.5" />
                   </span>
                   <span className="truncate text-xs font-normal text-foreground">
-                    {t('running.title', 'Open in VS Code or a terminal')}
+                    {t('running.title', 'Open in VS Code, a terminal or CloudCLI')}
                   </span>
                 </div>
                 <span className="rounded-full bg-sky-500/10 px-2 py-0.5 text-[11px] font-normal text-sky-700 dark:text-sky-300">

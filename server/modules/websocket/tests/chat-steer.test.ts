@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
+import { sessionsService } from '@/modules/providers/index.js';
 import { handleChatConnection } from '@/modules/websocket/services/chat-websocket.service.js';
 import { chatRunRegistry } from '@/modules/websocket/services/chat-run-registry.service.js';
 import { connectedClients } from '@/modules/websocket/services/websocket-state.service.js';
@@ -108,10 +109,13 @@ test('chat.steer hands the message to the session\'s provider runtime', async ()
     assert.deepEqual(steers[0].options.images, []);
     assert.deepEqual(steers[0].options.files, []);
     // The sender learns it was taken; the echo comes later on the run stream.
-    assert.equal(socket.frames.length, 1);
-    assert.equal(socket.frames[0].kind, 'chat_steer_accepted');
-    assert.equal(socket.frames[0].messageId, MESSAGE_ID);
-    assert.equal(socket.frames[0].sessionId, SESSION_ID);
+    // The session also opens in CloudCLI, which every client is told of.
+    const replies = socket.frames.filter((frame) => frame.kind !== 'open_sessions_changed');
+    assert.equal(replies.length, 1);
+    assert.equal(replies[0].kind, 'chat_steer_accepted');
+    assert.equal(replies[0].messageId, MESSAGE_ID);
+    assert.equal(replies[0].sessionId, SESSION_ID);
+    assert.deepEqual(sessionsService.listSessionsOpenInCloudCli().map((entry) => entry.sessionId), [SESSION_ID]);
   });
 });
 

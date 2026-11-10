@@ -16,8 +16,10 @@ const MemoizedProjectWorkspaceRouteContent = memo(ProjectWorkspaceRouteContent);
 
 /** This module's only public export: rendered by App for the "/" and "/session/:sessionId" routes. */
 export default function ProjectWorkspaceRoute() {
+  const { subscribe } = useWebSocket();
+
   return (
-    <SessionProtectionProvider>
+    <SessionProtectionProvider subscribe={subscribe}>
       <PaletteOpsProvider>
         <MemoizedProjectWorkspaceRouteContent />
       </PaletteOpsProvider>
